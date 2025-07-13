@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fami3D</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #111; color: white; font-family: sans-serif; }
+    #ui { position: fixed; top: 10px; left: 10px; z-index: 10; }
+    canvas { display: block; image-rendering: pixelated; }
+    #threejs-canvas { position: absolute; top: 0; left: 0; display: none; width: 100vw; height: 100vh; }
+    #nes-canvas { position: absolute; top: 0; left: 0; display: block; }
+  </style>
+</head>
+<body>
+
+<div id="ui">
+  <input type="file" id="romfile" accept=".nes" />
+  <button id="startBtn" disabled>Start Emulation</button>
+  <button id="toggle3dBtn">Switch to 3D</button>
+</div>
+
+<!-- jsnes emulator -->
+<script type="text/javascript" src="https://unpkg.com/jsnes@0.1.0/dist/jsnes.min.js"></script>
+<!-- three.js for 3D rendering -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.154.0/build/three.min.js"></script>
+
+<canvas id="nes-canvas" width="256" height="240"></canvas>
+<canvas id="threejs-canvas"></canvas>
+
+<!-- External script file -->
+<script src="script.js"></script>
+
+</body>
+</html>
+
