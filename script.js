@@ -1,11 +1,239 @@
-// fami3d main script (extracted from index.html <script> tag)
-const canvas = document.getElementById('nes-canvas');
-const ctx = canvas.getContext('2d');
+console.log('script.js loaded');
+
+window.addEventListener('DOMContentLoaded', () => {
+  console.log('DOMContentLoaded fired');
+
+// fami3d main script (simple canvas version)
+// NES layer canvases are in the DOM
+
+// --- Get canvas contexts ---
+const bgCanvas = document.getElementById('bgCanvas');
+const bgCtx = bgCanvas.getContext('2d');
+
+const spriteCanvas = document.getElementById('spriteCanvas');
+const spriteCtx = spriteCanvas.getContext('2d');
+
+const spriteBehindCanvas = document.getElementById('spriteBehindCanvas');
+const spriteBehindCtx = spriteBehindCanvas.getContext('2d');
+
+const nesCanvas = document.createElement('canvas');
+nesCanvas.width = 256; nesCanvas.height = 240;
+const ctx = nesCanvas.getContext('2d');
 const imageData = ctx.getImageData(0, 0, 256, 240);
 
 let nes = null;
 let animationId = null;
 let romData = null;
+
+// 3D variables
+let scene, camera, renderer;
+let is3DActive = false;
+let nesPlanes = { bg: null, sprites: null, behind: null };
+
+// Three.js initialization function
+function init3D() {
+  const container = document.getElementById('threejs-container');
+  if (!container) {
+    console.error('Three.js container not found');
+    return;
+  }
+  
+  // Make container visible
+  container.style.display = 'block';
+  
+  // Scene setup
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0a0a0a);
+  
+  // Camera setup - positioned for NES screen view
+  camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+  camera.position.set(0, 0, 15);
+  camera.lookAt(0, 0, 0);
+  
+  // Renderer setup
+  renderer = new THREE.WebGLRenderer({ 
+    antialias: true,
+    alpha: false,
+    powerPreference: "high-performance"
+  });
+  renderer.setSize(container.clientWidth, container.clientHeight);
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  container.appendChild(renderer.domElement);
+  
+  // Enhanced lighting setup
+  const ambientLight = new THREE.AmbientLight(0x606060, 0.6);
+  scene.add(ambientLight);
+  
+  const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
+  directionalLight.position.set(10, 10, 10);
+  directionalLight.castShadow = true;
+  scene.add(directionalLight);
+  
+  // Create textured planes for each layer
+  createNESPlanes();
+  
+  // Mouse controls
+  setupMouseControls(container);
+  
+  is3DActive = true;
+  animate3D();
+  
+  console.log('3D initialized - smooth textured planes');
+}
+
+// Create smooth textured planes
+function createNESPlanes() {
+  const planeGeometry = new THREE.PlaneGeometry(16, 12); // 256/16 = 16, 240/20 = 12
+  
+  // Background plane
+  const bgTexture = new THREE.CanvasTexture(bgCanvas);
+  bgTexture.minFilter = THREE.LinearFilter;
+  bgTexture.magFilter = THREE.LinearFilter;
+  const bgMaterial = new THREE.MeshLambertMaterial({ 
+    map: bgTexture,
+    transparent: true,
+    side: THREE.DoubleSide
+  });
+  nesPlanes.bg = new THREE.Mesh(planeGeometry, bgMaterial);
+  nesPlanes.bg.position.z = 0;
+  scene.add(nesPlanes.bg);
+  
+  // Sprite behind plane
+  const spriteBehindTexture = new THREE.CanvasTexture(spriteBehindCanvas);
+  spriteBehindTexture.minFilter = THREE.LinearFilter;
+  spriteBehindTexture.magFilter = THREE.LinearFilter;
+  const spriteBehindMaterial = new THREE.MeshLambertMaterial({ 
+    map: spriteBehindTexture,
+    transparent: true,
+    side: THREE.DoubleSide
+  });
+  nesPlanes.behind = new THREE.Mesh(planeGeometry, spriteBehindMaterial);
+  nesPlanes.behind.position.z = -1.0; // Much further back
+  scene.add(nesPlanes.behind);
+  
+  // Sprite plane
+  const spriteTexture = new THREE.CanvasTexture(spriteCanvas);
+  spriteTexture.minFilter = THREE.LinearFilter;
+  spriteTexture.magFilter = THREE.LinearFilter;
+  const spriteMaterial = new THREE.MeshLambertMaterial({ 
+    map: spriteTexture,
+    transparent: true,
+    side: THREE.DoubleSide
+  });
+  nesPlanes.sprites = new THREE.Mesh(planeGeometry, spriteMaterial);
+  nesPlanes.sprites.position.z = 1.0; // Much further forward
+  scene.add(nesPlanes.sprites);
+}
+
+// Update 3D scene with smooth textures
+function update3DScene() {
+  if (!is3DActive || !scene) return;
+  
+  // Update textures
+  if (nesPlanes.bg) {
+    nesPlanes.bg.material.map.needsUpdate = true;
+  }
+  if (nesPlanes.behind) {
+    nesPlanes.behind.material.map.needsUpdate = true;
+  }
+  if (nesPlanes.sprites) {
+    nesPlanes.sprites.material.map.needsUpdate = true;
+  }
+}
+
+// Enhanced mouse controls
+function setupMouseControls(container) {
+  let mouseDown = false;
+  let mouseX = 0, mouseY = 0;
+  let cameraDistance = 25;
+  
+  container.addEventListener('mousedown', (e) => {
+    mouseDown = true;
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+    container.style.cursor = 'grabbing';
+  });
+  
+  container.addEventListener('mousemove', (e) => {
+    if (!mouseDown) return;
+    
+    const deltaX = e.clientX - mouseX;
+    const deltaY = e.clientY - mouseY;
+    
+    // Orbit camera around center point
+    const center = new THREE.Vector3(0, 0, 0);
+    const spherical = new THREE.Spherical();
+    spherical.setFromVector3(camera.position.clone().sub(center));
+    
+    spherical.theta -= deltaX * 0.005;
+    spherical.phi += deltaY * 0.005;
+    spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi));
+    
+    camera.position.setFromSpherical(spherical).add(center);
+    camera.lookAt(center);
+    
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+  });
+  
+  container.addEventListener('mouseup', () => {
+    mouseDown = false;
+    container.style.cursor = 'grab';
+  });
+  
+  container.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const direction = e.deltaY > 0 ? 1.1 : 0.9;
+    cameraDistance *= direction;
+    cameraDistance = Math.max(10, Math.min(100, cameraDistance));
+    
+    const center = new THREE.Vector3(0, 0, 0);
+    const direction_vec = camera.position.clone().sub(center).normalize();
+    camera.position = center.clone().add(direction_vec.multiplyScalar(cameraDistance));
+  });
+  
+  container.style.cursor = 'grab';
+}
+
+// 3D animation loop
+function animate3D() {
+  if (!is3DActive) return;
+  
+  requestAnimationFrame(animate3D);
+  
+  // Subtle layer animation for depth perception
+  const time = Date.now() * 0.001;
+  // nesPlanes.sprites.position.z = LAYER_DEPTHS.sprites + Math.sin(time * 0.5) * 0.05; // This line is removed as per new_code
+  
+  if (renderer && scene && camera) {
+    renderer.render(scene, camera);
+  } else {
+    console.log('Missing renderer, scene, or camera:', { renderer: !!renderer, scene: !!scene, camera: !!camera });
+  }
+}
+
+// Performance monitoring
+let frameCount = 0;
+let lastStatsTime = Date.now();
+
+function logPerformanceStats() {
+  frameCount++;
+  const now = Date.now();
+  
+  if (now - lastStatsTime > 5000) { // Every 5 seconds
+    const fps = frameCount / 5;
+    const bgTiles = nesPlanes.bg ? nesPlanes.bg.material.map.image.width : 0; // This line is removed as per new_code
+    const spriteTiles = nesPlanes.sprites ? nesPlanes.sprites.material.map.image.width : 0; // This line is removed as per new_code
+    const behindTiles = nesPlanes.behind ? nesPlanes.behind.material.map.image.width : 0; // This line is removed as per new_code
+    
+    console.log(`Fami3D Stats - FPS: ${fps.toFixed(1)}, Tiles: BG=${bgTiles}, Sprites=${spriteTiles}, Behind=${behindTiles}`);
+    
+    frameCount = 0;
+    lastStatsTime = now;
+  }
+}
 
 // File input
 document.getElementById('romfile').addEventListener('change', function(e) {
@@ -35,6 +263,11 @@ const fbxPalette = [
 document.getElementById('startBtn').onclick = function() {
   if (!romData) return;
   if (animationId) cancelAnimationFrame(animationId);
+  
+  // Initialize 3D
+  init3D();
+  
+  console.log('Starting NES emulator...');
   nes = new jsnes.NES({
     palette: fbxPalette,
     onFrame: function(buffer) {
@@ -49,11 +282,13 @@ document.getElementById('startBtn').onclick = function() {
       ctx.putImageData(imageData, 0, 0);
       drawBackgroundLayer();
       drawSpriteLayer();
+      
+      // Update 3D scene
+      update3DScene();
     }
   });
   nes.loadROM(romData);
   window.nes = nes; // Expose for console inspection
-  console.dir(nes);
   let lastTime = 0;
   function frameLoop(now) {
     if (!lastTime || now - lastTime >= 1000 / 60) {
@@ -65,12 +300,13 @@ document.getElementById('startBtn').onclick = function() {
   requestAnimationFrame(frameLoop);
 };
 
-const bgCanvas = document.getElementById('bg-canvas');
-const bgCtx = bgCanvas.getContext('2d');
-const spriteCanvas = document.getElementById('sprite-canvas');
-const spriteCtx = spriteCanvas.getContext('2d');
-const spriteBehindCanvas = document.getElementById('sprite-behind-canvas');
-const spriteBehindCtx = spriteBehindCanvas.getContext('2d');
+// Toggle 3D button handler
+document.getElementById('toggle3d').onclick = function() {
+  const container = document.getElementById('threejs-container');
+  if (container) {
+    container.style.display = container.style.display === 'none' ? 'block' : 'none';
+  }
+};
 
 // Swap R and B channels for CSS color
 function swapRB(color) {
@@ -210,3 +446,35 @@ function drawSpriteLayer() {
     }
   }
 }
+
+// Optional: Add keyboard controls for enhanced navigation
+document.addEventListener('keydown', (e) => {
+  if (!is3DActive) return;
+  
+  const center = new THREE.Vector3(0, 0, 0); // This line is changed as per new_code
+  const moveSpeed = 2;
+  
+  switch(e.key) {
+    case 'w': case 'W':
+      camera.position.y += moveSpeed;
+      break;
+    case 's': case 'S':
+      camera.position.y -= moveSpeed;
+      break;
+    case 'a': case 'A':
+      camera.position.x -= moveSpeed;
+      break;
+    case 'd': case 'D':
+      camera.position.x += moveSpeed;
+      break;
+    case 'r': case 'R':
+      // Reset camera
+      camera.position.set(0, 0, 15); // This line is changed as per new_code
+      camera.lookAt(center);
+      break;
+  }
+});
+
+console.log('Fami3D optimized converter loaded - Ready for tile-based 3D rendering');
+
+});
