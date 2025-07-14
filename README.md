@@ -1,2 +1,2 @@
 # fami3d
-3d engine for family computer
+3d engine for the NES/Famicon
