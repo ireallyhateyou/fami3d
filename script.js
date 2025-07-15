@@ -30,6 +30,16 @@ let scene, camera, renderer;
 let is3DActive = false;
 let nesPlanes = { bg: null, sprites: null, behind: null };
 
+// Voxel sprite system variables
+let spriteVoxels = [];
+let voxelGeometry = null;
+let voxelMaterial = null;
+let useVoxelSprites = false; // Toggle between textured planes and voxels
+// Voxel background system variables
+let bgVoxels = [];
+let useVoxelBg = false; // Toggle for voxelized background
+let voxelBgMode = 'tile'; // 'tile', 'pixel', 'edge', or 'palette'
+
 // Three.js initialization function
 function init3D() {
   const container = document.getElementById('threejs-container');
@@ -45,9 +55,9 @@ function init3D() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0a0a0a);
   
-  // Camera setup - positioned for NES screen view
-  camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
-  camera.position.set(0, 0, 15);
+  // Camera setup - clear angle, far enough
+  camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 1000);
+  camera.position.set(0, 10, 30);
   camera.lookAt(0, 0, 0);
   
   // Renderer setup
@@ -63,11 +73,10 @@ function init3D() {
   container.appendChild(renderer.domElement);
   
   // Enhanced lighting setup
-  const ambientLight = new THREE.AmbientLight(0x606060, 0.6);
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.7); // Brighter ambient
   scene.add(ambientLight);
-  
-  const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
-  directionalLight.position.set(10, 10, 10);
+  const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2); // Stronger directional
+  directionalLight.position.set(40, 60, 100);
   directionalLight.castShadow = true;
   scene.add(directionalLight);
   
@@ -77,6 +86,8 @@ function init3D() {
   // Mouse controls
   setupMouseControls(container);
   
+  // --- Ensure voxel system is initialized ---
+  initVoxelSystem();
   is3DActive = true;
   animate3D();
   
@@ -141,6 +152,30 @@ function update3DScene() {
   if (nesPlanes.sprites) {
     nesPlanes.sprites.material.map.needsUpdate = true;
   }
+  // Voxel background logic
+  if (useVoxelBg) {
+    createBgVoxels();
+    if (nesPlanes.bg) nesPlanes.bg.visible = false; // Hide flat background plane
+  } else {
+    clearBgVoxels();
+    if (nesPlanes.bg) nesPlanes.bg.visible = true;
+  }
+  // Voxel sprite logic
+  if (useVoxelSprites) {
+    createSpriteVoxels();
+    if (nesPlanes.sprites) nesPlanes.sprites.visible = false;
+    if (nesPlanes.behind) nesPlanes.behind.visible = false;
+  } else {
+    clearSpriteVoxels();
+    if (nesPlanes.sprites) {
+      nesPlanes.sprites.visible = true;
+      nesPlanes.sprites.material.map.needsUpdate = true;
+    }
+    if (nesPlanes.behind) {
+      nesPlanes.behind.visible = true;
+      nesPlanes.behind.material.map.needsUpdate = true;
+    }
+  }
 }
 
 // Enhanced mouse controls
@@ -200,18 +235,13 @@ function setupMouseControls(container) {
 // 3D animation loop
 function animate3D() {
   if (!is3DActive) return;
-  
   requestAnimationFrame(animate3D);
-  
-  // Subtle layer animation for depth perception
-  const time = Date.now() * 0.001;
-  // nesPlanes.sprites.position.z = LAYER_DEPTHS.sprites + Math.sin(time * 0.5) * 0.05; // This line is removed as per new_code
-  
+  // Only animate voxels if needed (e.g., for effects)
+  animateVoxels();
+  // Always render the scene
   if (renderer && scene && camera) {
-    renderer.render(scene, camera);
-  } else {
-    console.log('Missing renderer, scene, or camera:', { renderer: !!renderer, scene: !!scene, camera: !!camera });
-  }
+  renderer.render(scene, camera);
+}
 }
 
 // Performance monitoring
@@ -243,6 +273,7 @@ document.getElementById('romfile').addEventListener('change', function(e) {
   reader.onload = function(event) {
     romData = event.target.result;
     document.getElementById('startBtn').disabled = false;
+    console.log('ROM loaded, startBtn enabled');
   };
   reader.readAsBinaryString(file);
 });
@@ -271,6 +302,7 @@ document.getElementById('startBtn').onclick = function() {
   nes = new jsnes.NES({
     palette: fbxPalette,
     onFrame: function(buffer) {
+      console.log('onFrame called');
       // buffer is Uint32Array (256*240), ARGB (JSNES default)
       for (let i = 0; i < 256 * 240; i++) {
         const c = buffer[i];
@@ -282,8 +314,7 @@ document.getElementById('startBtn').onclick = function() {
       ctx.putImageData(imageData, 0, 0);
       drawBackgroundLayer();
       drawSpriteLayer();
-      
-      // Update 3D scene
+      // Update 3D scene (textures, voxels, etc) every NES frame
       update3DScene();
     }
   });
@@ -291,6 +322,7 @@ document.getElementById('startBtn').onclick = function() {
   window.nes = nes; // Expose for console inspection
   let lastTime = 0;
   function frameLoop(now) {
+    console.log('frameLoop tick', now);
     if (!lastTime || now - lastTime >= 1000 / 60) {
       nes.frame();
       lastTime = now;
@@ -306,6 +338,173 @@ document.getElementById('toggle3d').onclick = function() {
   if (container) {
     container.style.display = container.style.display === 'none' ? 'block' : 'none';
   }
+};
+
+// Voxel system initialization
+function initVoxelSystem() {
+  voxelGeometry = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+  voxelMaterial = new THREE.MeshLambertMaterial({
+    transparent: true,
+    opacity: 0.9
+  });
+  console.log('Voxel system initialized');
+}
+
+// Clear all sprite voxels from the scene
+function clearSpriteVoxels() {
+  spriteVoxels.forEach(voxel => {
+    scene.remove(voxel);
+    voxel.geometry.dispose();
+    voxel.material.dispose();
+  });
+  spriteVoxels = [];
+}
+
+// Clear all background voxels from the scene
+function clearBgVoxels() {
+  bgVoxels.forEach(voxel => {
+    scene.remove(voxel);
+    voxel.geometry.dispose();
+    voxel.material.dispose();
+  });
+  bgVoxels = [];
+}
+
+// Create voxels for all sprites
+function createSpriteVoxels() {
+  if (!window.nes || !window.nes.ppu || !useVoxelSprites) return;
+  clearSpriteVoxels();
+  const ppu = window.nes.ppu;
+  const spriteSize = ppu.f_spriteSize ? 16 : 8;
+  const scaleX = 16 / 256;
+  const scaleY = 12 / 240;
+  for (let i = 0; i < 64; i++) {
+    let sx = ppu.sprX ? ppu.sprX[i] : 0;
+    let sy = ppu.sprY ? ppu.sprY[i] : 0;
+    const tileIdx = ppu.sprTile ? ppu.sprTile[i] : 0;
+    let palIdx = 0;
+    let priority = 0;
+    let flipH = 0, flipV = 0;
+    if (ppu.spriteMem && typeof ppu.spriteMem[i * 4 + 2] === 'number') {
+      const attr = ppu.spriteMem[i * 4 + 2];
+      palIdx = attr & 0x3;
+      priority = (attr >> 5) & 1;
+      flipH = (attr >> 6) & 1;
+      flipV = (attr >> 7) & 1;
+    }
+    sy += 1;
+    if (spriteSize === 8) {
+      createVoxelsFor8x8Sprite(sx, sy, tileIdx, palIdx, priority, flipH, flipV, scaleX, scaleY);
+  } else {
+      createVoxelsFor8x16Sprite(sx, sy, tileIdx, palIdx, priority, flipH, flipV, scaleX, scaleY);
+    }
+  }
+}
+
+function createVoxelsFor8x8Sprite(sx, sy, tileIdx, palIdx, priority, flipH, flipV, scaleX, scaleY) {
+  const ppu = window.nes.ppu;
+  const ptBase = (ppu.f_spPatternTable ? 0x1000 : 0x0000);
+  const ptAddr = ptBase + tileIdx * 16;
+  for (let row = 0; row < 8; row++) {
+    const plane0 = ppu.vramMem ? ppu.vramMem[ptAddr + row] : 0;
+    const plane1 = ppu.vramMem ? ppu.vramMem[ptAddr + row + 8] : 0;
+    for (let col = 0; col < 8; col++) {
+      const bit0 = (plane0 >> (7 - col)) & 1;
+      const bit1 = (plane1 >> (7 - col)) & 1;
+      const colorIdx = (bit1 << 1) | bit0;
+      if (colorIdx === 0) continue;
+      const rgb = getSpriteColor(ppu, palIdx, colorIdx);
+      let drawX = flipH ? (sx + 7 - col) : (sx + col);
+      let drawY = flipV ? (sy + 7 - row) : (sy + row);
+      createVoxel(drawX, drawY, rgb, priority, scaleX, scaleY);
+    }
+  }
+}
+
+function createVoxelsFor8x16Sprite(sx, sy, tileIdx, palIdx, priority, flipH, flipV, scaleX, scaleY) {
+  const ppu = window.nes.ppu;
+  for (let part = 0; part < 2; part++) {
+    const thisTileIdx = (tileIdx & 0xFE) + part;
+    const ptBase = (thisTileIdx & 1) ? 0x1000 : 0x0000;
+    const ptAddr = ptBase + (thisTileIdx >> 1) * 16;
+    for (let row = 0; row < 8; row++) {
+      const plane0 = ppu.vramMem ? ppu.vramMem[ptAddr + row] : 0;
+      const plane1 = ppu.vramMem ? ppu.vramMem[ptAddr + row + 8] : 0;
+      for (let col = 0; col < 8; col++) {
+        const bit0 = (plane0 >> (7 - col)) & 1;
+        const bit1 = (plane1 >> (7 - col)) & 1;
+        const colorIdx = (bit1 << 1) | bit0;
+        if (colorIdx === 0) continue;
+        const rgb = getSpriteColor(ppu, palIdx, colorIdx);
+        let drawX = flipH ? (sx + 7 - col) : (sx + col);
+        let drawY = flipV
+          ? (sy + 15 - (row + part * 8))
+          : (sy + row + part * 8);
+        createVoxel(drawX, drawY, rgb, priority, scaleX, scaleY);
+      }
+    }
+  }
+}
+
+function createVoxel(x, y, rgb, priority, scaleX, scaleY) {
+  // Restore original sprite voxel logic: fixed depth, no edge logic
+  const voxelDepth = 8; // or 3 for less thickness
+  const zSpacing = 0.5; // or 0.18 for less thickness
+  for (let z = 0; z < voxelDepth; z++) {
+    const material = new THREE.MeshLambertMaterial({
+      color: new THREE.Color(`rgb(${rgb[0]},${rgb[1]},${rgb[2]})`),
+      transparent: true,
+      opacity: 0.9
+    });
+    const voxel = new THREE.Mesh(voxelGeometry, material);
+    voxel.position.x = (x - 128) * scaleX;
+    voxel.position.y = (120 - y) * scaleY;
+    const baseZ = priority === 1 ? -0.5 : 2.0;
+    voxel.position.z = baseZ + (z - (voxelDepth - 1) / 2) * zSpacing;
+    scene.add(voxel);
+    spriteVoxels.push(voxel);
+  }
+}
+
+// Animate voxels
+function animateVoxels() {
+  if (!useVoxelSprites || spriteVoxels.length === 0) return;
+  const time = Date.now() * 0.001;
+  spriteVoxels.forEach((voxel, index) => {
+    const waveOffset = Math.sin(time * 2 + index * 0.1) * 0.1;
+    voxel.position.z += waveOffset;
+    voxel.rotation.y = time * 0.5 + index * 0.1;
+  });
+}
+
+// Voxel toggle button
+const toggleVoxelsBtn = document.getElementById('toggleVoxels');
+toggleVoxelsBtn.onclick = function() {
+  useVoxelSprites = !useVoxelSprites;
+  this.textContent = useVoxelSprites ? 'Use Textured Sprites' : 'Use Voxel Sprites';
+  console.log('Voxel sprites:', useVoxelSprites ? 'enabled' : 'disabled');
+  update3DScene();
+};
+
+// Voxel background toggle button
+const toggleVoxelBgBtn = document.getElementById('toggleVoxelBg');
+toggleVoxelBgBtn.onclick = function() {
+  useVoxelBg = !useVoxelBg;
+  this.textContent = useVoxelBg ? 'Use Textured Background' : 'Use Voxel Background';
+  console.log('Voxel background:', useVoxelBg ? 'enabled' : 'disabled');
+  update3DScene();
+};
+
+// Voxelization mode toggle button
+const toggleVoxelModeBtn = document.getElementById('toggleVoxelMode');
+toggleVoxelModeBtn.onclick = function() {
+  // Cycle through tile -> pixel -> edge -> palette -> tile
+  if (voxelBgMode === 'tile') voxelBgMode = 'pixel';
+  else if (voxelBgMode === 'pixel') voxelBgMode = 'edge';
+  else if (voxelBgMode === 'edge') voxelBgMode = 'palette';
+  else voxelBgMode = 'tile';
+  this.textContent = `Voxelization: ${voxelBgMode.charAt(0).toUpperCase() + voxelBgMode.slice(1)}`;
+  if (useVoxelBg) update3DScene();
 };
 
 // Swap R and B channels for CSS color
@@ -445,6 +644,233 @@ function drawSpriteLayer() {
       }
     }
   }
+}
+
+// Create voxels for the background layer (robust, tile, pixel, and edge modes)
+function createBgVoxels() {
+  if (!window.nes || !window.nes.ppu || !useVoxelBg) return;
+  clearBgVoxels();
+  const ppu = window.nes.ppu;
+  const scaleX = 16 / 256;
+  const scaleY = 12 / 240;
+  let count = 0;
+  if (voxelBgMode === 'tile') {
+    // Per-tile voxelization (Minecraft style)
+    for (let y = 0; y < 30; y++) for (let x = 0; x < 32; x++) {
+      const ntAddr = 0x2000 + y * 32 + x;
+      const tileIdx = ppu.vramMem ? ppu.vramMem[ntAddr] : 0;
+      // Attribute table
+      const ntBase = 0x2000 + ((ntAddr - 0x2000) & 0x0C00);
+      const attrTableAddr = ntBase + 0x3C0 + ((y >> 2) * 8) + (x >> 2);
+      let attrByte = 0;
+      if (ppu.vramMem && typeof ppu.vramMem[attrTableAddr] === 'number') {
+        attrByte = ppu.vramMem[attrTableAddr];
+      }
+      const shift = ((y & 2) << 1) | (x & 2);
+      const palIdx = (attrByte >> shift) & 0x3;
+      // Get tile color (use center pixel for color)
+      const ptBase = (ppu.f_bgPatternTable ? 0x1000 : 0x0000);
+      const ptAddr = ptBase + tileIdx * 16;
+      let colorIdx = 0;
+      for (let row = 0; row < 8; row++) {
+        const plane0 = ppu.vramMem ? ppu.vramMem[ptAddr + row] : 0;
+        const plane1 = ppu.vramMem ? ppu.vramMem[ptAddr + row + 8] : 0;
+        for (let col = 0; col < 8; col++) {
+          const bit0 = (plane0 >> (7 - col)) & 1;
+          const bit1 = (plane1 >> (7 - col)) & 1;
+          if ((bit1 << 1) | bit0) {
+            colorIdx = (bit1 << 1) | bit0;
+            break;
+          }
+        }
+        if (colorIdx) break;
+      }
+      let paletteBase = palIdx * 4;
+      let color = 0x888888;
+      if (ppu.imgPalette && Array.isArray(ppu.imgPalette)) {
+        if (colorIdx === 0) {
+          color = ppu.imgPalette[0];
+        } else {
+          color = ppu.imgPalette[paletteBase + colorIdx];
+        }
+      }
+      // Top color
+      const rgb = [
+        (color >> 16) & 0xFF,
+        (color >> 8) & 0xFF,
+        color & 0xFF
+      ];
+      // Side color (darker)
+      const sideRgb = rgb.map(v => Math.floor(v * 0.4));
+      // Block geometry
+      const blockW = 8 * scaleX;
+      const blockH = 8 * scaleY;
+      const blockD = 2.5; // THICK
+      // Top face
+      const topGeom = new THREE.BoxGeometry(blockW, blockH, blockD);
+      const materials = [
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(`rgb(${sideRgb[0]},${sideRgb[1]},${sideRgb[2]})`) }), // left
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(`rgb(${sideRgb[0]},${sideRgb[1]},${sideRgb[2]})`) }), // right
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(`rgb(${sideRgb[0]},${sideRgb[1]},${sideRgb[2]})`) }), // top
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(`rgb(${sideRgb[0]},${sideRgb[1]},${sideRgb[2]})`) }), // bottom
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(`rgb(${rgb[0]},${rgb[1]},${rgb[2]})`) }), // front (top face)
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(`rgb(${sideRgb[0]},${sideRgb[1]},${sideRgb[2]})`) })  // back
+      ];
+      const block = new THREE.Mesh(topGeom, materials);
+      block.position.x = (x * 8 + 4 - 128) * scaleX;
+      block.position.y = (120 - (y * 8 + 4)) * scaleY;
+      block.position.z = 0;
+      scene.add(block);
+      bgVoxels.push(block);
+      count++;
+    }
+  } else if (voxelBgMode === 'pixel') {
+    // Per-pixel voxelization (each nonzero pixel is a voxel)
+    for (let y = 0; y < 240; y++) for (let x = 0; x < 256; x++) {
+      const idx = (y * 256 + x) * 4;
+      // Get color from bgCanvas
+      const data = bgCtx.getImageData(x, y, 1, 1).data;
+      if (data[3] === 0) continue; // transparent
+      // Only draw nonzero color
+      if (data[0] === 0 && data[1] === 0 && data[2] === 0) continue;
+      // Top color
+      const rgb = [data[0], data[1], data[2]];
+      // Side color (darker)
+      const sideRgb = rgb.map(v => Math.floor(v * 0.4));
+      // Voxel geometry
+      const voxelW = scaleX;
+      const voxelH = scaleY;
+      const voxelD = 1.2; // THICK
+      const geom = new THREE.BoxGeometry(voxelW, voxelH, voxelD);
+      const materials = [
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(`rgb(${sideRgb[0]},${sideRgb[1]},${sideRgb[2]})`) }), // left
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(`rgb(${sideRgb[0]},${sideRgb[1]},${sideRgb[2]})`) }), // right
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(`rgb(${sideRgb[0]},${sideRgb[1]},${sideRgb[2]})`) }), // top
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(`rgb(${sideRgb[0]},${sideRgb[1]},${sideRgb[2]})`) }), // bottom
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(`rgb(${rgb[0]},${rgb[1]},${rgb[2]})`) }), // front (top face)
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(`rgb(${sideRgb[0]},${sideRgb[1]},${sideRgb[2]})`) })  // back
+      ];
+      const voxel = new THREE.Mesh(geom, materials);
+      voxel.position.x = (x - 128) * scaleX;
+      voxel.position.y = (120 - y) * scaleY;
+      voxel.position.z = 0;
+      scene.add(voxel);
+      bgVoxels.push(voxel);
+      count++;
+    }
+  } else if (voxelBgMode === 'edge') {
+    // Edge-based extrusion (per-pixel edge detection)
+    // 1. Get color data for the whole background
+    const bgData = bgCtx.getImageData(0, 0, 256, 240).data;
+    // 2. Helper to get color at (x, y) as a string
+    function getColor(x, y) {
+      if (x < 0 || x >= 256 || y < 0 || y >= 240) return null;
+      const idx = (y * 256 + x) * 4;
+      return `${bgData[idx]},${bgData[idx+1]},${bgData[idx+2]}`;
+    }
+    // 3. For each pixel, check if it's an edge (color differs from any neighbor)
+    for (let y = 0; y < 240; y++) for (let x = 0; x < 256; x++) {
+      const idx = (y * 256 + x) * 4;
+      if (bgData[idx+3] === 0) continue; // transparent
+      const color = getColor(x, y);
+      // Check 4-neighbors
+      let isEdge = false;
+      for (const [dx, dy] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+        const nColor = getColor(x+dx, y+dy);
+        if (nColor !== null && nColor !== color) {
+          isEdge = true;
+          break;
+        }
+      }
+      if (!isEdge) continue;
+      // Top color
+      const rgb = [bgData[idx], bgData[idx+1], bgData[idx+2]];
+      // Side color (darker)
+      const sideRgb = rgb.map(v => Math.floor(v * 0.4));
+      // Voxel geometry
+      const voxelW = scaleX;
+      const voxelH = scaleY;
+      const voxelD = 2.0; // Thicker for edge
+      const geom = new THREE.BoxGeometry(voxelW, voxelH, voxelD);
+      const materials = [
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(`rgb(${sideRgb[0]},${sideRgb[1]},${sideRgb[2]})`) }), // left
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(`rgb(${sideRgb[0]},${sideRgb[1]},${sideRgb[2]})`) }), // right
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(`rgb(${sideRgb[0]},${sideRgb[1]},${sideRgb[2]})`) }), // top
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(`rgb(${sideRgb[0]},${sideRgb[1]},${sideRgb[2]})`) }), // bottom
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(`rgb(${rgb[0]},${rgb[1]},${rgb[2]})`) }), // front (top face)
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(`rgb(${sideRgb[0]},${sideRgb[1]},${sideRgb[2]})`) })  // back
+      ];
+      const voxel = new THREE.Mesh(geom, materials);
+      voxel.position.x = (x - 128) * scaleX;
+      voxel.position.y = (120 - y) * scaleY;
+      voxel.position.z = 0;
+      scene.add(voxel);
+      bgVoxels.push(voxel);
+      count++;
+    }
+  } else if (voxelBgMode === 'palette') {
+    // Palette region (attribute block) extrusion
+    // NES attribute regions are 16x16 pixels, 32/2=16 x 30/2=15 regions
+    // 1. Build palette index map for each region
+    const regionPalIdx = [];
+    for (let ry = 0; ry < 15; ry++) {
+      regionPalIdx[ry] = [];
+      for (let rx = 0; rx < 16; rx++) {
+        // Attribute table address
+        const attrTableAddr = 0x23C0 + (ry >> 1) * 8 + (rx >> 1);
+        let attrByte = 0;
+        if (ppu.vramMem && typeof ppu.vramMem[attrTableAddr] === 'number') {
+          attrByte = ppu.vramMem[attrTableAddr];
+        }
+        // Which quadrant in the attribute byte?
+        const shift = ((!!(ry & 1)) << 1) | (!!(rx & 1));
+        const palIdx = (attrByte >> (shift * 2)) & 0x3;
+        regionPalIdx[ry][rx] = palIdx;
+      }
+    }
+    // 2. For each region, check if it's at a palette boundary
+    for (let ry = 0; ry < 15; ry++) for (let rx = 0; rx < 16; rx++) {
+      const palIdx = regionPalIdx[ry][rx];
+      // Check 4-neighbors for palette difference
+      let isEdge = false;
+      for (const [dx, dy] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+        const nx = rx + dx, ny = ry + dy;
+        if (nx < 0 || nx >= 16 || ny < 0 || ny >= 15) continue;
+        if (regionPalIdx[ny][nx] !== palIdx) {
+          isEdge = true;
+          break;
+        }
+      }
+      if (!isEdge) continue;
+      // 3. Get representative color for this region (center pixel)
+      const cx = rx * 16 + 8;
+      const cy = ry * 16 + 8;
+      const data = bgCtx.getImageData(cx, cy, 1, 1).data;
+      const rgb = [data[0], data[1], data[2]];
+      const sideRgb = rgb.map(v => Math.floor(v * 0.3));
+      // 4. Create a thick block for this region
+      const blockW = 16 * scaleX;
+      const blockH = 16 * scaleY;
+      const blockD = 4.0;
+      const geom = new THREE.BoxGeometry(blockW, blockH, blockD);
+      const materials = [
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(`rgb(${sideRgb[0]},${sideRgb[1]},${sideRgb[2]})`) }), // left
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(`rgb(${sideRgb[0]},${sideRgb[1]},${sideRgb[2]})`) }), // right
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(`rgb(${sideRgb[0]},${sideRgb[1]},${sideRgb[2]})`) }), // top
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(`rgb(${sideRgb[0]},${sideRgb[1]},${sideRgb[2]})`) }), // bottom
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(`rgb(${rgb[0]},${rgb[1]},${rgb[2]})`) }), // front
+        new THREE.MeshLambertMaterial({ color: new THREE.Color(`rgb(${sideRgb[0]},${sideRgb[1]},${sideRgb[2]})`) })  // back
+      ];
+      const block = new THREE.Mesh(geom, materials);
+      block.position.x = (rx * 16 + 8 - 128) * scaleX;
+      block.position.y = (120 - (ry * 16 + 8)) * scaleY;
+      block.position.z = 0;
+      scene.add(block);
+      bgVoxels.push(block);
+      count++;
+    }
+  }
+  console.log(`[VoxelBG] Mode: ${voxelBgMode}, Voxels/Blocks: ${count}`);
 }
 
 // Optional: Add keyboard controls for enhanced navigation
