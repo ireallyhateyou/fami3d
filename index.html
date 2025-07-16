@@ -54,9 +54,14 @@
     <input type="file" id="romfile" accept=".nes" />
     <button id="startBtn" disabled>Start</button>
     <button id="toggle3d">Toggle 3D</button>
-    <button id="toggleVoxels" style="margin-left:8px;">Toggle Voxel Sprites</button>
-    <button id="toggleVoxelBg" style="margin-left:8px;">Toggle Voxel Background</button>
-    <button id="toggleVoxelMode" style="margin-left:8px;">Voxelization: Tile</button>
+    <div style="margin-top:8px;">
+      <button id="toggleVoxels">Use Voxel Sprites</button>
+      <button id="toggleVoxelBg">Use Voxel Background</button>
+      <select id="voxelMode">
+        <option value="tile">Tile Mode</option>
+        <option value="pixel">Pixel Mode</option>
+      </select>
+    </div>
   </div>
   <div class="canvas-container">
     <canvas id="bgCanvas" width="256" height="240"></canvas>
@@ -64,6 +69,7 @@
     <canvas id="spriteCanvas" width="256" height="240"></canvas>
   </div>
   <div id="threejs-container" style="display: none;"></div>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128/examples/js/controls/OrbitControls.js"></script>
   <script src="script.js"></script>
 </body>
 </html>
