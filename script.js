@@ -3,25 +3,25 @@ console.log('script.js loaded');
 window.addEventListener('DOMContentLoaded', () => {
   console.log('DOMContentLoaded fired');
 
-  // --- Get canvas contexts ---
-  const bgCanvas = document.getElementById('bgCanvas');
-  const bgCtx = bgCanvas.getContext('2d');
+// --- Get canvas contexts ---
+const bgCanvas = document.getElementById('bgCanvas');
+const bgCtx = bgCanvas.getContext('2d');
 
-  const spriteCanvas = document.getElementById('spriteCanvas');
-  const spriteCtx = spriteCanvas.getContext('2d');
+const spriteCanvas = document.getElementById('spriteCanvas');
+const spriteCtx = spriteCanvas.getContext('2d');
 
-  const spriteBehindCanvas = document.getElementById('spriteBehindCanvas');
-  const spriteBehindCtx = spriteBehindCanvas.getContext('2d');
+const spriteBehindCanvas = document.getElementById('spriteBehindCanvas');
+const spriteBehindCtx = spriteBehindCanvas.getContext('2d');
 
-  const nesCanvas = document.createElement('canvas');
+const nesCanvas = document.createElement('canvas');
   nesCanvas.width = 256; 
   nesCanvas.height = 240;
-  const ctx = nesCanvas.getContext('2d');
-  const imageData = ctx.getImageData(0, 0, 256, 240);
+const ctx = nesCanvas.getContext('2d');
+const imageData = ctx.getImageData(0, 0, 256, 240);
 
-  let nes = null;
-  let animationId = null;
-  let romData = null;
+let nes = null;
+let animationId = null;
+let romData = null;
 
   // ===== CENTRAL STATE FLAGS =====
   let use3D = false;
@@ -44,7 +44,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // ===== THREE.JS SETUP =====
   function setupThreeJS() {
-    const container = document.getElementById('threejs-container');
+  const container = document.getElementById('threejs-container');
     
     // Clear container
     container.innerHTML = '';
@@ -53,8 +53,8 @@ window.addEventListener('DOMContentLoaded', () => {
     threeRenderer = new THREE.WebGLRenderer({ antialias: true });
     threeRenderer.setSize(container.clientWidth, container.clientHeight);
     container.appendChild(threeRenderer.domElement);
-
-    // Scene setup
+  
+  // Scene setup
     threeScene = new THREE.Scene();
     threeScene.background = new THREE.Color(0x0a0a0a);
 
@@ -113,6 +113,80 @@ window.addEventListener('DOMContentLoaded', () => {
     console.log('Three.js setup complete - 3D tiles');
   }
 
+  // ===== TILE MESH CACHE FOR PER-PIXEL EXTRUSION =====
+  const tileMeshCache = new Map(); // key: `${tileIdx}_${palIdx}` => geometry
+
+  function createPixelExtrudedTileGeometry(tileCanvas, avgColor) {
+    // Each non-background pixel becomes a small box (voxel)
+    const ctx = tileCanvas.getContext('2d');
+    const imgData = ctx.getImageData(0, 0, 8, 8).data;
+    const geometries = [];
+    for (let py = 0; py < 8; py++) {
+      for (let px = 0; px < 8; px++) {
+        const idx = (py * 8 + px) * 4;
+        // Consider pixel non-background if alpha > 0 and not black
+        if (imgData[idx + 3] > 0 && (imgData[idx] > 8 || imgData[idx + 1] > 8 || imgData[idx + 2] > 8)) {
+          // Small box for this pixel
+          const box = new THREE.BoxGeometry(0.0625, 0.0625, 1.0); // 1/16 NES unit
+          // Position the box within the tile (centered)
+          box.translate((px - 4) * 0.0625 + 0.03125, (3.5 - py) * 0.0625 + 0.03125, 0.5);
+          geometries.push(box);
+        }
+      }
+    }
+    // Merge all boxes into one geometry
+    if (geometries.length === 0) {
+      // fallback: flat plane
+      return new THREE.BoxGeometry(0.5, 0.5, 0.01);
+    }
+    const merged = THREE.BufferGeometryUtils.mergeBufferGeometries(geometries);
+    return merged;
+  }
+
+  function getSpriteAverageColor(canvas) {
+    const ctx = canvas.getContext('2d');
+    const imgData = ctx.getImageData(0, 0, 256, 240).data;
+    let r = 0, g = 0, b = 0, count = 0;
+    for (let i = 0; i < imgData.length; i += 4) {
+      if (imgData[i + 3] > 32) {
+        r += imgData[i];
+        g += imgData[i + 1];
+        b += imgData[i + 2];
+        count++;
+      }
+    }
+    if (count === 0) return [255, 255, 255];
+    r = Math.round(r / count);
+    g = Math.round(g / count);
+    b = Math.round(b / count);
+    return [r, g, b];
+  }
+
+  function createPixelExtrudedSpriteGeometry(spriteCanvas) {
+    // Each opaque pixel becomes a small box (voxel)
+    const ctx = spriteCanvas.getContext('2d');
+    const imgData = ctx.getImageData(0, 0, 256, 240).data;
+    const geometries = [];
+    for (let py = 0; py < 240; py++) {
+      for (let px = 0; px < 256; px++) {
+        const idx = (py * 256 + px) * 4;
+        if (imgData[idx + 3] > 32) {
+          // Small box for this pixel
+          const box = new THREE.BoxGeometry(1 / 16, 1 / 20, 0.5); // scale to NES units
+          // Position the box within the sprite (centered)
+          box.translate((px - 128) / 16 + 1 / 32, (120 - py) / 20 + 1 / 40, 0.25);
+          geometries.push(box);
+        }
+      }
+    }
+    if (geometries.length === 0) {
+      // fallback: flat plane
+      return new THREE.BoxGeometry(16, 12, 0.01);
+    }
+    const merged = THREE.BufferGeometryUtils.mergeBufferGeometries(geometries);
+    return merged;
+  }
+
   // ===== 3D BACKGROUND TILES (OPTIMIZED, BOXES FOR PROMINENT) =====
   let bgTileMeshes = [];
   let bgTileCanvases = [];
@@ -121,6 +195,8 @@ window.addEventListener('DOMContentLoaded', () => {
   let lastTileImageData = [];
   let lastTileIdx = [];
   let lastTilePal = [];
+  let lastTileDepth = [];
+  let bgTileOverlayPlanes = [];
   function create3DBackgroundTiles() {
     // Only create once
     if (bgTileMeshes.length) return;
@@ -131,6 +207,8 @@ window.addEventListener('DOMContentLoaded', () => {
     lastTileImageData = [];
     lastTileIdx = [];
     lastTilePal = [];
+    lastTileDepth = [];
+    bgTileOverlayPlanes = [];
     for (let ty = 0; ty < 30; ty++) {
       bgTileMeshes[ty] = [];
       bgTileCanvases[ty] = [];
@@ -139,6 +217,8 @@ window.addEventListener('DOMContentLoaded', () => {
       lastTileImageData[ty] = [];
       lastTileIdx[ty] = [];
       lastTilePal[ty] = [];
+      lastTileDepth[ty] = [];
+      bgTileOverlayPlanes[ty] = [];
       for (let tx = 0; tx < 32; tx++) {
         // Canvas and texture for this tile
         const tileCanvas = document.createElement('canvas');
@@ -173,22 +253,53 @@ window.addEventListener('DOMContentLoaded', () => {
         lastTileImageData[ty][tx] = null;
         lastTileIdx[ty][tx] = null;
         lastTilePal[ty][tx] = null;
+        lastTileDepth[ty][tx] = 0.01;
+        // Overlay plane for original tile
+        const overlayTexture = new THREE.CanvasTexture(tileCanvas);
+        overlayTexture.minFilter = THREE.NearestFilter;
+        overlayTexture.magFilter = THREE.NearestFilter;
+        const overlayMat = new THREE.MeshBasicMaterial({ map: overlayTexture, transparent: true });
+        const overlayPlane = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.5), overlayMat);
+        overlayPlane.position.z = 1.01; // Just in front of the extrusion
+        mesh.add(overlayPlane);
+        bgTileOverlayPlanes[ty][tx] = { plane: overlayPlane, texture: overlayTexture };
       }
     }
   }
 
+  function getTileProminenceDepth(canvas, tx, ty, tileSize, bgColor) {
+    const ctx = canvas.getContext('2d');
+    const imgData = ctx.getImageData(tx * tileSize, ty * tileSize, tileSize, tileSize).data;
+    let prominent = 0, total = tileSize * tileSize;
+    for (let i = 0; i < imgData.length; i += 4) {
+      const r = imgData[i], g = imgData[i+1], b = imgData[i+2];
+      const dist = Math.sqrt(
+        (r - bgColor[0]) ** 2 +
+        (g - bgColor[1]) ** 2 +
+        (b - bgColor[2]) ** 2
+      );
+      if (dist > 16) prominent++;
+    }
+    // Map to depth
+    const minDepth = 0.01, maxDepth = 1.0;
+    return minDepth + (maxDepth - minDepth) * (prominent / total);
+  }
+
   function update3DBackgroundTiles() {
     if (!bgTileMeshes.length) return;
-    const prominence = getTileProminenceMap(bgCanvas, 8);
+    // Get background color for prominence calculation
+    const ctx = bgCanvas.getContext('2d');
+    const bgPixel = ctx.getImageData(4, 4, 1, 1).data;
+    const bgColor = [bgPixel[0], bgPixel[1], bgPixel[2]];
     let ppu = nes && nes.ppu;
-    // Check if the whole scene is mostly black
     const sceneCleared = isSceneMostlyBlack(bgCanvas);
     for (let ty = 0; ty < 30; ty++) {
       for (let tx = 0; tx < 32; tx++) {
         let tileChanged = false;
+        let tileIdx = null, palIdx = null;
         if (ppu && ppu.vramMem) {
           const ntAddr = 0x2000 + ty * 32 + tx;
-          const tileIdx = ppu.vramMem[ntAddr];
+          tileIdx = ppu.vramMem[ntAddr];
           const ntBase = 0x2000 + ((ntAddr - 0x2000) & 0x0C00);
           const attrTableAddr = ntBase + 0x3C0 + ((ty >> 2) * 8) + (tx >> 2);
           let attrByte = 0;
@@ -196,7 +307,7 @@ window.addEventListener('DOMContentLoaded', () => {
             attrByte = ppu.vramMem[attrTableAddr];
           }
           const shift = ((ty & 2) << 1) | (tx & 2);
-          const palIdx = (attrByte >> shift) & 0x3;
+          palIdx = (attrByte >> shift) & 0x3;
           if (lastTileIdx[ty][tx] !== tileIdx || lastTilePal[ty][tx] !== palIdx) {
             tileChanged = true;
             lastTileIdx[ty][tx] = tileIdx;
@@ -212,35 +323,37 @@ window.addEventListener('DOMContentLoaded', () => {
           tileCtx.clearRect(0, 0, 8, 8);
           tileCtx.drawImage(bgCanvas, tx * 8, ty * 8, 8, 8, 0, 0, 8, 8);
           bgTileTextures[ty][tx].needsUpdate = true;
+          // Also update overlay plane texture
+          if (bgTileOverlayPlanes[ty] && bgTileOverlayPlanes[ty][tx]) {
+            bgTileOverlayPlanes[ty][tx].texture.needsUpdate = true;
+          }
         }
-        // Check if tile is mostly black or scene is mostly black
+        // Compute per-pixel silhouette extrusion for this tile
         const mesh = bgTileMeshes[ty][tx];
         let tileInvisible = sceneCleared || isTileMostlyBlack(bgCanvas, tx, ty, 8);
         if (tileInvisible) {
           mesh.visible = false;
         } else {
           mesh.visible = true;
-          // Update Z and geometry if prominence changed
-          if (lastProminence[ty][tx] !== prominence[ty][tx]) {
-            // Update geometry
-            if (prominence[ty][tx]) {
-              mesh.geometry.dispose();
-              mesh.geometry = new THREE.BoxGeometry(0.5, 0.5, 1.0);
-              mesh.position.z = 0.5;
-            } else {
-              mesh.geometry.dispose();
-              mesh.geometry = new THREE.BoxGeometry(0.5, 0.5, 0.01);
-              mesh.position.z = 0;
-            }
-            // Update side colors to match new tile average color
+          // Use cache key based on tileIdx and palIdx
+          const cacheKey = `${tileIdx}_${palIdx}`;
+          let geometry = tileMeshCache.get(cacheKey);
+          if (!geometry) {
+            // Generate geometry for this tile
+            const tileCanvas = bgTileCanvases[ty][tx];
+            const avgColor = getTileAverageColor(bgCanvas, tx, ty, 8);
+            geometry = createPixelExtrudedTileGeometry(tileCanvas, avgColor);
+            tileMeshCache.set(cacheKey, geometry);
+          }
+          if (mesh.geometry !== geometry) {
+            mesh.geometry.dispose();
+            mesh.geometry = geometry;
+            // Assign a single material with the average color for merged geometry
             const avgColor = getTileAverageColor(bgCanvas, tx, ty, 8);
             const avgColorHex = `#${((1 << 24) + (avgColor[0] << 16) + (avgColor[1] << 8) + avgColor[2]).toString(16).slice(1)}`;
-            // Sides: 0,1,2,3,5 (not 4, which is the front texture)
-            [0,1,2,3,5].forEach(i => {
-              if (mesh.material[i]) mesh.material[i].color.set(avgColorHex);
-            });
-            lastProminence[ty][tx] = prominence[ty][tx];
+            mesh.material = new THREE.MeshLambertMaterial({ color: avgColorHex });
           }
+          // Overlay plane is always on top, texture updated above if needed
         }
       }
     }
@@ -322,6 +435,7 @@ window.addEventListener('DOMContentLoaded', () => {
     spriteBehindBoxMesh.position.z = -0.6;
     threeScene.add(spriteBehindBoxMesh);
     spriteTileGroup = spriteBehindBoxMesh;
+    // (No overlay plane for sprite behind)
 
     // Sprite box
     spriteTexture = new THREE.CanvasTexture(spriteCanvas);
@@ -338,6 +452,7 @@ window.addEventListener('DOMContentLoaded', () => {
     spriteBoxMesh = new THREE.Mesh(new THREE.BoxGeometry(16, 12, 0.1), spriteMatArray);
     spriteBoxMesh.position.z = 2.1;
     threeScene.add(spriteBoxMesh);
+    // (No overlay plane for main sprite)
   }
 
   // ===== 3D SCENE UPDATE =====
@@ -346,25 +461,26 @@ window.addEventListener('DOMContentLoaded', () => {
     update3DBackgroundTiles();
     if (spriteTexture) spriteTexture.needsUpdate = true;
     if (spriteBehindTexture) spriteBehindTexture.needsUpdate = true;
-    // Update sprite extrusion depth per frame
+    // (No sprite overlay texture updates)
+    // Per-pixel extrusion for main sprite
     if (spriteBoxMesh) {
-      const depth = getSpriteExtrusionDepth(spriteCanvas);
+      const geometry = createPixelExtrudedSpriteGeometry(spriteCanvas);
       spriteBoxMesh.geometry.dispose();
-      spriteBoxMesh.geometry = new THREE.BoxGeometry(16, 12, depth);
-      spriteBoxMesh.position.z = 2.1 + depth / 2 - 0.05; // keep front face at same z
+      spriteBoxMesh.geometry = geometry;
+      const avgColor = getSpriteAverageColor(spriteCanvas);
+      const avgColorHex = `#${((1 << 24) + (avgColor[0] << 16) + (avgColor[1] << 8) + avgColor[2]).toString(16).slice(1)}`;
+      spriteBoxMesh.material = new THREE.MeshLambertMaterial({ color: avgColorHex });
+      spriteBoxMesh.position.z = 2.1 + 0.25; // keep front face at same z
     }
+    // Per-pixel extrusion for sprite behind
     if (spriteBehindBoxMesh) {
-      const depth = getSpriteExtrusionDepth(spriteBehindCanvas);
+      const geometry = createPixelExtrudedSpriteGeometry(spriteBehindCanvas);
       spriteBehindBoxMesh.geometry.dispose();
-      spriteBehindBoxMesh.geometry = new THREE.BoxGeometry(16, 12, depth);
-      spriteBehindBoxMesh.position.z = -0.6 - (1 - depth) / 2; // keep front face at same z
-    }
-    // Update background panel color to match NES background color (sample top-left pixel)
-    if (bgPanelMesh && bgPanelMesh.userData.bgPanelMaterial) {
-      const ctx = bgCanvas.getContext('2d');
-      const pixel = ctx.getImageData(0, 0, 1, 1).data;
-      const hex = (pixel[0] << 16) | (pixel[1] << 8) | pixel[2];
-      bgPanelMesh.userData.bgPanelMaterial.color.setHex(hex);
+      spriteBehindBoxMesh.geometry = geometry;
+      const avgColor = getSpriteAverageColor(spriteBehindCanvas);
+      const avgColorHex = `#${((1 << 24) + (avgColor[0] << 16) + (avgColor[1] << 8) + avgColor[2]).toString(16).slice(1)}`;
+      spriteBehindBoxMesh.material = new THREE.MeshLambertMaterial({ color: avgColorHex });
+      spriteBehindBoxMesh.position.z = -0.6 + 0.25;
     }
     // Render
     threeRenderer.render(threeScene, threeCamera);
@@ -535,55 +651,55 @@ window.addEventListener('DOMContentLoaded', () => {
       spriteBehindData[i] = 0; spriteBehindData[i + 1] = 0; spriteBehindData[i + 2] = 0; spriteBehindData[i + 3] = 0;
     }
     
-    const spriteSize = ppu.f_spriteSize ? 16 : 8;
+  const spriteSize = ppu.f_spriteSize ? 16 : 8;
     
-    for (let i = 0; i < 64; i++) {
-      let sx = ppu.sprX ? ppu.sprX[i] : 0;
-      let sy = ppu.sprY ? ppu.sprY[i] : 0;
-      const tileIdx = ppu.sprTile ? ppu.sprTile[i] : 0;
+  for (let i = 0; i < 64; i++) {
+    let sx = ppu.sprX ? ppu.sprX[i] : 0;
+    let sy = ppu.sprY ? ppu.sprY[i] : 0;
+    const tileIdx = ppu.sprTile ? ppu.sprTile[i] : 0;
       
-      let palIdx = 0;
-      let priority = 0;
-      let flipH = 0, flipV = 0;
+    let palIdx = 0;
+    let priority = 0;
+    let flipH = 0, flipV = 0;
       
-      if (ppu.spriteMem && typeof ppu.spriteMem[i * 4 + 2] === 'number') {
-        const attr = ppu.spriteMem[i * 4 + 2];
-        palIdx = attr & 0x3;
-        priority = (attr >> 5) & 1;
-        flipH = (attr >> 6) & 1;
-        flipV = (attr >> 7) & 1;
-      }
-      
-      sy += 1;
-      
-      if (spriteSize === 8) {
-        render8x8SpriteOptimized(sx, sy, tileIdx, palIdx, priority, flipH, flipV, ppu);
-      } else {
-        render8x16SpriteOptimized(sx, sy, tileIdx, palIdx, priority, flipH, flipV, ppu);
-      }
+    if (ppu.spriteMem && typeof ppu.spriteMem[i * 4 + 2] === 'number') {
+      const attr = ppu.spriteMem[i * 4 + 2];
+      palIdx = attr & 0x3;
+      priority = (attr >> 5) & 1;
+      flipH = (attr >> 6) & 1;
+      flipV = (attr >> 7) & 1;
     }
+      
+    sy += 1;
+      
+    if (spriteSize === 8) {
+        render8x8SpriteOptimized(sx, sy, tileIdx, palIdx, priority, flipH, flipV, ppu);
+  } else {
+        render8x16SpriteOptimized(sx, sy, tileIdx, palIdx, priority, flipH, flipV, ppu);
+    }
+  }
     
     spriteCtx.putImageData(spriteImageData, 0, 0);
     spriteBehindCtx.putImageData(spriteBehindImageData, 0, 0);
-  }
+}
 
   function render8x8SpriteOptimized(sx, sy, tileIdx, palIdx, priority, flipH, flipV, ppu) {
     const ptBase = ppu.f_spPatternTable ? 0x1000 : 0x0000;
-    const ptAddr = ptBase + tileIdx * 16;
+  const ptAddr = ptBase + tileIdx * 16;
     const targetData = priority === 1 ? spriteBehindImageData.data : spriteImageData.data;
     
-    for (let row = 0; row < 8; row++) {
-      const plane0 = ppu.vramMem ? ppu.vramMem[ptAddr + row] : 0;
-      const plane1 = ppu.vramMem ? ppu.vramMem[ptAddr + row + 8] : 0;
+  for (let row = 0; row < 8; row++) {
+    const plane0 = ppu.vramMem ? ppu.vramMem[ptAddr + row] : 0;
+    const plane1 = ppu.vramMem ? ppu.vramMem[ptAddr + row + 8] : 0;
       
-      for (let col = 0; col < 8; col++) {
-        const bit0 = (plane0 >> (7 - col)) & 1;
-        const bit1 = (plane1 >> (7 - col)) & 1;
-        const colorIdx = (bit1 << 1) | bit0;
+    for (let col = 0; col < 8; col++) {
+      const bit0 = (plane0 >> (7 - col)) & 1;
+      const bit1 = (plane1 >> (7 - col)) & 1;
+      const colorIdx = (bit1 << 1) | bit0;
         
-        if (colorIdx === 0) continue;
+      if (colorIdx === 0) continue;
         
-        const rgb = getSpriteColor(ppu, palIdx, colorIdx);
+      const rgb = getSpriteColor(ppu, palIdx, colorIdx);
         const drawX = flipH ? (sx + 7 - col) : (sx + col);
         const drawY = flipV ? (sy + 7 - row) : (sy + row);
         
@@ -601,23 +717,23 @@ window.addEventListener('DOMContentLoaded', () => {
   function render8x16SpriteOptimized(sx, sy, tileIdx, palIdx, priority, flipH, flipV, ppu) {
     const targetData = priority === 1 ? spriteBehindImageData.data : spriteImageData.data;
     
-    for (let part = 0; part < 2; part++) {
-      const thisTileIdx = (tileIdx & 0xFE) + part;
-      const ptBase = (thisTileIdx & 1) ? 0x1000 : 0x0000;
-      const ptAddr = ptBase + (thisTileIdx >> 1) * 16;
+  for (let part = 0; part < 2; part++) {
+    const thisTileIdx = (tileIdx & 0xFE) + part;
+    const ptBase = (thisTileIdx & 1) ? 0x1000 : 0x0000;
+    const ptAddr = ptBase + (thisTileIdx >> 1) * 16;
       
-      for (let row = 0; row < 8; row++) {
-        const plane0 = ppu.vramMem ? ppu.vramMem[ptAddr + row] : 0;
-        const plane1 = ppu.vramMem ? ppu.vramMem[ptAddr + row + 8] : 0;
+    for (let row = 0; row < 8; row++) {
+      const plane0 = ppu.vramMem ? ppu.vramMem[ptAddr + row] : 0;
+      const plane1 = ppu.vramMem ? ppu.vramMem[ptAddr + row + 8] : 0;
         
-        for (let col = 0; col < 8; col++) {
-          const bit0 = (plane0 >> (7 - col)) & 1;
-          const bit1 = (plane1 >> (7 - col)) & 1;
-          const colorIdx = (bit1 << 1) | bit0;
+      for (let col = 0; col < 8; col++) {
+        const bit0 = (plane0 >> (7 - col)) & 1;
+        const bit1 = (plane1 >> (7 - col)) & 1;
+        const colorIdx = (bit1 << 1) | bit0;
           
-          if (colorIdx === 0) continue;
+        if (colorIdx === 0) continue;
           
-          const rgb = getSpriteColor(ppu, palIdx, colorIdx);
+        const rgb = getSpriteColor(ppu, palIdx, colorIdx);
           const drawX = flipH ? (sx + 7 - col) : (sx + col);
           const drawY = flipV ? 
             (sy + 15 - (row + part * 8)) : 
@@ -651,17 +767,17 @@ window.addEventListener('DOMContentLoaded', () => {
     return result;
   }
 
-  function swapRB(color) {
-    color = color & 0xFFFFFF;
-    const r = (color >> 16) & 0xFF;
-    const g = (color >> 8) & 0xFF;
-    const b = color & 0xFF;
-    return (b << 16) | (g << 8) | r;
-  }
+function swapRB(color) {
+  color = color & 0xFFFFFF;
+  const r = (color >> 16) & 0xFF;
+  const g = (color >> 8) & 0xFF;
+  const b = color & 0xFF;
+  return (b << 16) | (g << 8) | r;
+}
 
-  function getSpriteColor(ppu, palIdx, colorIdx) {
-    const paletteAddr = 0x3F10 + palIdx * 4 + colorIdx;
-    const nesColorIdx = ppu.vramMem ? ppu.vramMem[paletteAddr & 0x3F1F] : 0;
+function getSpriteColor(ppu, palIdx, colorIdx) {
+  const paletteAddr = 0x3F10 + palIdx * 4 + colorIdx;
+  const nesColorIdx = ppu.vramMem ? ppu.vramMem[paletteAddr & 0x3F1F] : 0;
     return fbxPalette[nesColorIdx % 64] || [136, 136, 136];
   }
 
@@ -679,6 +795,30 @@ window.addEventListener('DOMContentLoaded', () => {
     reader.readAsBinaryString(file);
   });
 
+  // ===== AUDIO SETUP =====
+  let nesAudioPlayer = null;
+
+  // ===== BACKGROUND COLOR UPDATE TIMER =====
+  let bgPanelColorTimer = null;
+  let bgPanelColorInterval = null;
+  function updateBgPanelColor() {
+    if (bgPanelMesh && bgPanelMesh.userData.bgPanelMaterial) {
+      // Use NES universal background color (palette $3F00) if available
+      let hex = 0x000000;
+      if (window.nes && nes.ppu && nes.ppu.vramMem && typeof fbxPalette !== 'undefined') {
+        const bgColorIdx = nes.ppu.vramMem[0x3F00] || 0;
+        const rgb = fbxPalette[bgColorIdx % 64] || [0,0,0];
+        hex = (rgb[0] << 16) | (rgb[1] << 8) | rgb[2];
+      } else {
+        // Fallback: sample from bgCanvas only
+        const ctx = bgCanvas.getContext('2d');
+        const pixel = ctx.getImageData(0, 0, 1, 1).data;
+        hex = (pixel[0] << 16) | (pixel[1] << 8) | pixel[2];
+      }
+      bgPanelMesh.userData.bgPanelMaterial.color.setHex(hex);
+    }
+  }
+
   document.getElementById('startBtn').onclick = function() {
     if (!romData) return;
     if (animationId) cancelAnimationFrame(animationId);
@@ -691,6 +831,15 @@ window.addEventListener('DOMContentLoaded', () => {
     window.nesCanvas = nesCanvas; // for debugging
     window.nesCtx = ctx;
     window.nesImageData = imageData;
+
+    // ===== AUDIO: Create WebAudioPlayer if not already =====
+    if (!nesAudioPlayer && window.jsnes && jsnes.WebAudioPlayer) {
+      nesAudioPlayer = new jsnes.WebAudioPlayer();
+    }
+    // Resume audio context on user gesture (required by browsers)
+    if (nesAudioPlayer && nesAudioPlayer.ctx && nesAudioPlayer.ctx.state === 'suspended') {
+      nesAudioPlayer.ctx.resume();
+    }
 
     // Reset tile caches and mesh visibility
     if (typeof lastTileImageData !== 'undefined') {
@@ -732,6 +881,15 @@ window.addEventListener('DOMContentLoaded', () => {
         }
       }
     }
+    if (typeof lastTileDepth !== 'undefined') {
+      for (let ty = 0; ty < lastTileDepth.length; ty++) {
+        if (lastTileDepth[ty]) {
+          for (let tx = 0; tx < lastTileDepth[ty].length; tx++) {
+            lastTileDepth[ty][tx] = null;
+          }
+        }
+      }
+    }
 
     console.log('Starting NES emulator...');
     nes = new jsnes.NES({
@@ -757,7 +915,8 @@ window.addEventListener('DOMContentLoaded', () => {
             }
           }
         }
-      }
+      },
+      audio: nesAudioPlayer
     });
     nes.loadROM(romData);
     window.nes = nes;
@@ -772,6 +931,14 @@ window.addEventListener('DOMContentLoaded', () => {
     requestAnimationFrame(frameLoop);
     // Start main render loop
     renderFrame(0);
+
+    // ===== BACKGROUND COLOR TIMER: update 2s after start, then every 10s =====
+    if (bgPanelColorTimer) clearTimeout(bgPanelColorTimer);
+    if (bgPanelColorInterval) clearInterval(bgPanelColorInterval);
+    bgPanelColorTimer = setTimeout(() => {
+      updateBgPanelColor();
+      bgPanelColorInterval = setInterval(updateBgPanelColor, 10000);
+    }, 2000);
   };
 
   // ===== TOGGLE BUTTON BEHAVIOR =====
