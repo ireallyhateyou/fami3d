@@ -23,264 +23,169 @@ window.addEventListener('DOMContentLoaded', () => {
   let animationId = null;
   let romData = null;
 
-  // 3D variables
-  let scene, camera, renderer, controls;
-  let is3DActive = false;
-  let nesPlanes = { bg: null, sprites: null, behind: null };
+  // ===== CENTRAL STATE FLAGS =====
+  let use3D = false;
+  let nesFrameChanged = false;
+  let lastRenderTime = 0;
+  const TARGET_FPS = 60;
+  const FRAME_TIME = 1000 / TARGET_FPS;
 
-  // Voxel sprite system variables
-  let spriteVoxels = [];
-  let useVoxelSprites = false;
-  let bgVoxels = [];
-  let useVoxelBg = false;
-  let voxelBgMode = 'pixel'; // Default to pixel mode
+  // ===== THREE.JS VARIABLES =====
+  let threeScene, threeRenderer, threeCamera, threeControls;
+  let bgTileGroup, spriteTileGroup;
+  let bgTexture, spriteTexture, spriteBehindTexture;
 
-  // ===== VOXEL SYSTEM =====
-  let voxelGeometry = new THREE.BoxGeometry(0.5, 0.5, 0.5);
-  let voxelMaterialCache = {};
+  // ===== PERFORMANCE OPTIMIZATIONS =====
+  const colorCache = new Map();
+  const bgImageData = bgCtx.createImageData(256, 240);
+  const spriteImageData = spriteCtx.createImageData(256, 240);
+  const spriteBehindImageData = spriteBehindCtx.createImageData(256, 240);
 
-  function getVoxelMaterial(rgb) {
-    const key = `${rgb[0]},${rgb[1]},${rgb[2]}`;
-    if (!voxelMaterialCache[key]) {
-      voxelMaterialCache[key] = new THREE.MeshLambertMaterial({
-        color: new THREE.Color(rgb[0]/255, rgb[1]/255, rgb[2]/255),
-        transparent: true,
-        opacity: 0.95
-      });
-    }
-    return voxelMaterialCache[key];
-  }
-
-  // ===== 3D INITIALIZATION =====
-  function init3D() {
+  // ===== THREE.JS SETUP =====
+  function setupThreeJS() {
     const container = document.getElementById('threejs-container');
-    container.style.display = 'block';
     
-    // Scene setup
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0a0a0a);
-    
-    // Camera setup - closer to scene
-    camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
-    camera.position.set(0, 10, 20);
+    // Clear container
+    container.innerHTML = '';
     
     // Renderer setup
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(container.clientWidth, container.clientHeight);
-    container.appendChild(renderer.domElement);
-    
+    threeRenderer = new THREE.WebGLRenderer({ antialias: true });
+    threeRenderer.setSize(container.clientWidth, container.clientHeight);
+    container.appendChild(threeRenderer.domElement);
+
+    // Scene setup
+    threeScene = new THREE.Scene();
+    threeScene.background = new THREE.Color(0x0a0a0a);
+
+    // Camera setup
+    threeCamera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+    threeCamera.position.set(0, 20, 40);
+
+    // Controls setup
+    threeControls = new THREE.OrbitControls(threeCamera, threeRenderer.domElement);
+    threeControls.enableDamping = true;
+    threeControls.dampingFactor = 0.05;
+    threeControls.screenSpacePanning = false;
+    threeControls.minDistance = 10;
+    threeControls.maxDistance = 50;
+    threeControls.maxPolarAngle = Math.PI / 2;
+
     // Lighting
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-    scene.add(ambientLight);
-    
+    threeScene.add(ambientLight);
+
     const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    directionalLight.position.set(5, 10, 7);
+    directionalLight.position.set(10, 20, 10);
     directionalLight.castShadow = true;
-    scene.add(directionalLight);
-    
-    // Add grid for reference
+    threeScene.add(directionalLight);
+
+    // Grid and axes
     const gridHelper = new THREE.GridHelper(30, 30, 0x444444);
-    scene.add(gridHelper);
-    
-    // Add axes helper
+    threeScene.add(gridHelper);
+
     const axesHelper = new THREE.AxesHelper(5);
-    scene.add(axesHelper);
-    
-    // Setup camera controls
-    controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.screenSpacePanning = false;
-    controls.minDistance = 10;
-    controls.maxDistance = 50;
-    controls.maxPolarAngle = Math.PI / 2;
-    
-    is3DActive = true;
-    animate3D();
+    threeScene.add(axesHelper);
+
+    // Create three flat layers
+    createFlatLayers();
+
+    console.log('Three.js setup complete - flat layers');
   }
 
-  // ===== VOXEL MANAGEMENT =====
-  function clearSpriteVoxels() {
-    spriteVoxels.forEach(voxel => {
-      scene.remove(voxel);
-      if (voxel.geometry) voxel.geometry.dispose();
-      if (voxel.material) {
-        if (Array.isArray(voxel.material)) {
-          voxel.material.forEach(mat => mat.dispose());
-        } else {
-          voxel.material.dispose();
-        }
-      }
+  // ===== FLAT LAYERS =====
+  function createFlatLayers() {
+    const planeGeometry = new THREE.PlaneGeometry(16, 12); // 256/16 = 16, 240/20 = 12
+    
+    // Background plane
+    bgTexture = new THREE.CanvasTexture(bgCanvas);
+    bgTexture.minFilter = THREE.LinearFilter;
+    bgTexture.magFilter = THREE.LinearFilter;
+    const bgMaterial = new THREE.MeshLambertMaterial({ 
+      map: bgTexture,
+      transparent: true,
+      side: THREE.DoubleSide
     });
-    spriteVoxels = [];
-  }
-
-  function clearBgVoxels() {
-    bgVoxels.forEach(voxel => {
-      scene.remove(voxel);
-      if (voxel.geometry) voxel.geometry.dispose();
-      if (voxel.material) {
-        if (Array.isArray(voxel.material)) {
-          voxel.material.forEach(mat => mat.dispose());
-        } else {
-          voxel.material.dispose();
-        }
-      }
+    bgTileGroup = new THREE.Mesh(planeGeometry, bgMaterial);
+    bgTileGroup.position.z = 0;
+    threeScene.add(bgTileGroup);
+    
+    // Sprite behind plane
+    spriteBehindTexture = new THREE.CanvasTexture(spriteBehindCanvas);
+    spriteBehindTexture.minFilter = THREE.LinearFilter;
+    spriteBehindTexture.magFilter = THREE.LinearFilter;
+    const spriteBehindMaterial = new THREE.MeshLambertMaterial({ 
+      map: spriteBehindTexture,
+      transparent: true,
+      side: THREE.DoubleSide
     });
-    bgVoxels = [];
+    spriteTileGroup = new THREE.Mesh(planeGeometry, spriteBehindMaterial);
+    spriteTileGroup.position.z = -1.0; // Behind background
+    threeScene.add(spriteTileGroup);
+    
+    // Sprite plane
+    spriteTexture = new THREE.CanvasTexture(spriteCanvas);
+    spriteTexture.minFilter = THREE.LinearFilter;
+    spriteTexture.magFilter = THREE.LinearFilter;
+    const spriteMaterial = new THREE.MeshLambertMaterial({ 
+      map: spriteTexture,
+      transparent: true,
+      side: THREE.DoubleSide
+    });
+    const spritePlane = new THREE.Mesh(planeGeometry, spriteMaterial);
+    spritePlane.position.z = 1.0; // In front of background
+    threeScene.add(spritePlane);
   }
 
-  // ===== SPRITE VOXELS =====
-  function createSpriteVoxels() {
-    if (!nes || !nes.ppu || !useVoxelSprites) return;
-    
-    clearSpriteVoxels();
-    const ppu = nes.ppu;
-    const scale = 0.05;
-    
-    for (let i = 0; i < 64; i++) {
-      const sx = ppu.sprX[i] || 0;
-      const sy = (ppu.sprY[i] || 0) + 1;
-      const tileIdx = ppu.sprTile[i] || 0;
-      const attr = ppu.spriteMem?.[i * 4 + 2] || 0;
-      
-      const palIdx = attr & 0x3;
-      const priority = (attr >> 5) & 1;
-      const flipH = (attr >> 6) & 1;
-      const flipV = (attr >> 7) & 1;
-      
-      // Create 3D sprite representation
-      for (let row = 0; row < 8; row++) {
-        for (let col = 0; col < 8; col++) {
-          const colorIdx = getSpritePixel(tileIdx, row, col, ppu);
-          if (colorIdx === 0) continue; // Skip transparent pixels
-          
-          const rgb = getSpriteColor(ppu, palIdx, colorIdx);
-          const drawX = flipH ? (sx + 7 - col) : (sx + col);
-          const drawY = flipV ? (sy + 7 - row) : (sy + row);
-          
-          // Create voxel with height variation
-          createSpriteVoxel(drawX, drawY, rgb, scale, priority);
-        }
+  // ===== 3D SCENE UPDATE =====
+  function updateThreeScene() {
+    if (!use3D || !threeScene) return;
+
+    // Only update textures when they actually changed
+    if (bgTexture) bgTexture.needsUpdate = true;
+    if (spriteTexture) spriteTexture.needsUpdate = true;
+    if (spriteBehindTexture) spriteBehindTexture.needsUpdate = true;
+
+    // Render
+    threeRenderer.render(threeScene, threeCamera);
+  }
+
+  // ===== MAIN RENDER LOOP =====
+  function renderFrame(now) {
+    // Frame rate limiting
+    if (now - lastRenderTime < FRAME_TIME) {
+      requestAnimationFrame(renderFrame);
+      return;
+    }
+    lastRenderTime = now;
+
+    if (nesFrameChanged) {
+      drawLayeredCanvases(); // 2D canvas drawing
+      if (use3D) {
+        updateThreeScene(); // 3D from canvas pixels
       }
+      nesFrameChanged = false;
     }
+    requestAnimationFrame(renderFrame);
   }
 
-  function getSpritePixel(tileIdx, row, col, ppu) {
-    const ptBase = ppu.f_spPatternTable ? 0x1000 : 0x0000;
-    const ptAddr = ptBase + tileIdx * 16;
-    const plane0 = ppu.vramMem?.[ptAddr + row] || 0;
-    const plane1 = ppu.vramMem?.[ptAddr + row + 8] || 0;
-    const bit0 = (plane0 >> (7 - col)) & 1;
-    const bit1 = (plane1 >> (7 - col)) & 1;
-    return (bit1 << 1) | bit0;
+  // ===== 2D CANVAS DRAWING =====
+  function drawLayeredCanvases() {
+    drawBackgroundLayer();
+    drawSpriteLayer();
   }
 
-  function createSpriteVoxel(x, y, rgb, scale, priority) {
-    const material = getVoxelMaterial(rgb);
-    const voxel = new THREE.Mesh(voxelGeometry, material);
-    
-    // Position in 3D space
-    voxel.position.set(
-      (x - 128) * scale,
-      (Math.random() * 1) + 1, // Height variation
-      (y - 120) * -scale // Invert Y for depth
-    );
-    
-    // Scale for depth
-    voxel.scale.set(1, 1 + Math.random() * 2, 1);
-    
-    scene.add(voxel);
-    spriteVoxels.push(voxel);
-  }
-
-  // ===== BACKGROUND VOXELS =====
-  function createBgVoxels() {
-    if (!nes || !nes.ppu || !useVoxelBg) return;
-    
-    clearBgVoxels();
-    const ppu = nes.ppu;
-    const scale = 0.05;
-    
-    for (let ty = 0; ty < 30; ty++) {
-      for (let tx = 0; tx < 32; tx++) {
-        const tileIdx = ppu.vramMem?.[0x2000 + ty * 32 + tx] || 0;
-        const height = (tileIdx % 8) + 1; // Height based on tile
-        
-        for (let py = 0; py < 8; py++) {
-          for (let px = 0; px < 8; px++) {
-            const color = getTileColor(tx, ty, px, py, ppu);
-            createBgVoxel(tx, ty, px, py, color, height, scale);
-          }
-        }
-      }
-    }
-  }
-
-  function getTileColor(tx, ty, px, py, ppu) {
-    const x = tx * 8 + px;
-    const y = ty * 8 + py;
-    const data = bgCtx.getImageData(x, y, 1, 1).data;
-    return [data[0], data[1], data[2]];
-  }
-
-  function createBgVoxel(tx, ty, px, py, rgb, height, scale) {
-    const material = getVoxelMaterial(rgb);
-    const voxel = new THREE.Mesh(voxelGeometry, material);
-    
-    // Position in 3D space
-    voxel.position.set(
-      (tx * 8 + px - 128) * scale,
-      height * 0.5, // Center at half height
-      (ty * 8 + py - 120) * -scale // Invert Y for depth
-    );
-    
-    // Set height
-    voxel.scale.y = height;
-    
-    scene.add(voxel);
-    bgVoxels.push(voxel);
-  }
-
-  // ===== 3D SCENE MANAGEMENT =====
-  function update3DScene() {
-    if (!is3DActive) return;
-    
-    // Update voxels
-    if (useVoxelSprites) createSpriteVoxels();
-    if (useVoxelBg) createBgVoxels();
-    
-    // Toggle plane visibility
-    if (nesPlanes.bg) nesPlanes.bg.visible = !useVoxelBg;
-    if (nesPlanes.sprites) nesPlanes.sprites.visible = !useVoxelSprites;
-  }
-
-  // ===== ANIMATION LOOP =====
-  function animate3D() {
-    if (!is3DActive) return;
-    
-    requestAnimationFrame(animate3D);
-    
-    // Update controls
-    if (controls) controls.update();
-    
-    // Simple animation
-    if (spriteVoxels.length > 0) {
-      const time = Date.now() * 0.001;
-      spriteVoxels.forEach((voxel, i) => {
-        voxel.rotation.y = time * 0.5 + i * 0.1;
-        voxel.position.y = 1 + Math.sin(time * 2 + i) * 0.5;
-      });
-    }
-    
-    renderer.render(scene, camera);
-  }
-
-  // ===== NES RENDERING =====
   function drawBackgroundLayer() {
     if (!nes || !nes.ppu) return;
     const ppu = nes.ppu;
-    bgCtx.clearRect(0, 0, 256, 240);
+    
+    // Clear with ImageData for better performance
+    const data = bgImageData.data;
+    for (let i = 0; i < data.length; i += 4) {
+      data[i] = 0;     // R
+      data[i + 1] = 0; // G
+      data[i + 2] = 0; // B
+      data[i + 3] = 255; // A
+    }
     
     const ptBase = ppu.f_bgPatternTable ? 0x1000 : 0x0000;
     
@@ -310,6 +215,8 @@ window.addEventListener('DOMContentLoaded', () => {
             const bit1 = (plane1 >> (7 - col)) & 1;
             const colorIdx = (bit1 << 1) | bit0;
             
+            if (colorIdx === 0) continue; // Skip transparent pixels
+            
             let paletteBase = palIdx * 4;
             let color = 0x888888;
             
@@ -321,19 +228,36 @@ window.addEventListener('DOMContentLoaded', () => {
               }
             }
             
-            bgCtx.fillStyle = `#${swapRB(color).toString(16).padStart(6, '0')}`;
-            bgCtx.fillRect(x * 8 + col, y * 8 + row, 1, 1);
+            // Use cached color conversion
+            const rgb = getCachedColor(color);
+            const pixelX = x * 8 + col;
+            const pixelY = y * 8 + row;
+            const index = (pixelY * 256 + pixelX) * 4;
+            
+            data[index] = rgb[0];     // R
+            data[index + 1] = rgb[1]; // G
+            data[index + 2] = rgb[2]; // B
+            data[index + 3] = 255;    // A
           }
         }
       }
     }
+    
+    bgCtx.putImageData(bgImageData, 0, 0);
   }
 
   function drawSpriteLayer() {
     if (!nes || !nes.ppu) return;
     const ppu = nes.ppu;
-    spriteCtx.clearRect(0, 0, 256, 240);
-    spriteBehindCtx.clearRect(0, 0, 256, 240);
+    
+    // Clear sprite canvases with ImageData
+    const spriteData = spriteImageData.data;
+    const spriteBehindData = spriteBehindImageData.data;
+    
+    for (let i = 0; i < spriteData.length; i += 4) {
+      spriteData[i] = 0; spriteData[i + 1] = 0; spriteData[i + 2] = 0; spriteData[i + 3] = 0;
+      spriteBehindData[i] = 0; spriteBehindData[i + 1] = 0; spriteBehindData[i + 2] = 0; spriteBehindData[i + 3] = 0;
+    }
     
     const spriteSize = ppu.f_spriteSize ? 16 : 8;
     
@@ -357,16 +281,20 @@ window.addEventListener('DOMContentLoaded', () => {
       sy += 1;
       
       if (spriteSize === 8) {
-        render8x8Sprite(sx, sy, tileIdx, palIdx, priority, flipH, flipV, ppu);
+        render8x8SpriteOptimized(sx, sy, tileIdx, palIdx, priority, flipH, flipV, ppu);
       } else {
-        render8x16Sprite(sx, sy, tileIdx, palIdx, priority, flipH, flipV, ppu);
+        render8x16SpriteOptimized(sx, sy, tileIdx, palIdx, priority, flipH, flipV, ppu);
       }
     }
+    
+    spriteCtx.putImageData(spriteImageData, 0, 0);
+    spriteBehindCtx.putImageData(spriteBehindImageData, 0, 0);
   }
 
-  function render8x8Sprite(sx, sy, tileIdx, palIdx, priority, flipH, flipV, ppu) {
+  function render8x8SpriteOptimized(sx, sy, tileIdx, palIdx, priority, flipH, flipV, ppu) {
     const ptBase = ppu.f_spPatternTable ? 0x1000 : 0x0000;
     const ptAddr = ptBase + tileIdx * 16;
+    const targetData = priority === 1 ? spriteBehindImageData.data : spriteImageData.data;
     
     for (let row = 0; row < 8; row++) {
       const plane0 = ppu.vramMem ? ppu.vramMem[ptAddr + row] : 0;
@@ -380,17 +308,23 @@ window.addEventListener('DOMContentLoaded', () => {
         if (colorIdx === 0) continue;
         
         const rgb = getSpriteColor(ppu, palIdx, colorIdx);
-        const ctxToUse = priority === 1 ? spriteBehindCtx : spriteCtx;
         const drawX = flipH ? (sx + 7 - col) : (sx + col);
         const drawY = flipV ? (sy + 7 - row) : (sy + row);
         
-        ctxToUse.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
-        ctxToUse.fillRect(drawX, drawY, 1, 1);
+        if (drawX >= 0 && drawX < 256 && drawY >= 0 && drawY < 240) {
+          const index = (drawY * 256 + drawX) * 4;
+          targetData[index] = rgb[0];
+          targetData[index + 1] = rgb[1];
+          targetData[index + 2] = rgb[2];
+          targetData[index + 3] = 255;
+        }
       }
     }
   }
 
-  function render8x16Sprite(sx, sy, tileIdx, palIdx, priority, flipH, flipV, ppu) {
+  function render8x16SpriteOptimized(sx, sy, tileIdx, palIdx, priority, flipH, flipV, ppu) {
+    const targetData = priority === 1 ? spriteBehindImageData.data : spriteImageData.data;
+    
     for (let part = 0; part < 2; part++) {
       const thisTileIdx = (tileIdx & 0xFE) + part;
       const ptBase = (thisTileIdx & 1) ? 0x1000 : 0x0000;
@@ -408,20 +342,39 @@ window.addEventListener('DOMContentLoaded', () => {
           if (colorIdx === 0) continue;
           
           const rgb = getSpriteColor(ppu, palIdx, colorIdx);
-          const ctxToUse = priority === 1 ? spriteBehindCtx : spriteCtx;
           const drawX = flipH ? (sx + 7 - col) : (sx + col);
           const drawY = flipV ? 
             (sy + 15 - (row + part * 8)) : 
             (sy + row + part * 8);
           
-          ctxToUse.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
-          ctxToUse.fillRect(drawX, drawY, 1, 1);
+          if (drawX >= 0 && drawX < 256 && drawY >= 0 && drawY < 240) {
+            const index = (drawY * 256 + drawX) * 4;
+            targetData[index] = rgb[0];
+            targetData[index + 1] = rgb[1];
+            targetData[index + 2] = rgb[2];
+            targetData[index + 3] = 255;
+          }
         }
       }
     }
   }
 
   // ===== UTILITY FUNCTIONS =====
+  function getCachedColor(color) {
+    if (colorCache.has(color)) {
+      return colorCache.get(color);
+    }
+    
+    const swapped = swapRB(color);
+    const r = (swapped >> 16) & 0xFF;
+    const g = (swapped >> 8) & 0xFF;
+    const b = swapped & 0xFF;
+    const result = [r, g, b];
+    
+    colorCache.set(color, result);
+    return result;
+  }
+
   function swapRB(color) {
     color = color & 0xFFFFFF;
     const r = (color >> 16) & 0xFF;
@@ -454,8 +407,6 @@ window.addEventListener('DOMContentLoaded', () => {
     if (!romData) return;
     if (animationId) cancelAnimationFrame(animationId);
     
-    init3D();
-    
     console.log('Starting NES emulator...');
     nes = new jsnes.NES({
       palette: fbxPalette,
@@ -468,9 +419,7 @@ window.addEventListener('DOMContentLoaded', () => {
           imageData.data[i * 4 + 3] = 0xFF;
         }
         ctx.putImageData(imageData, 0, 0);
-        drawBackgroundLayer();
-        drawSpriteLayer();
-        update3DScene();
+        nesFrameChanged = true;
       }
     });
     
@@ -486,31 +435,21 @@ window.addEventListener('DOMContentLoaded', () => {
       animationId = requestAnimationFrame(frameLoop);
     }
     requestAnimationFrame(frameLoop);
+    
+    // Start main render loop
+    renderFrame(0);
   };
 
-  document.getElementById('toggle3d').onclick = function() {
+  // ===== TOGGLE BUTTON BEHAVIOR =====
+  document.getElementById('toggle3d').onclick = () => {
+    use3D = !use3D;
     const container = document.getElementById('threejs-container');
-    if (container) {
-      container.style.display = container.style.display === 'none' ? 'block' : 'none';
+    container.style.display = use3D ? 'block' : 'none';
+    
+    if (use3D && !threeScene) {
+      setupThreeJS();
     }
   };
-
-  document.getElementById('toggleVoxels').onclick = function() {
-    useVoxelSprites = !useVoxelSprites;
-    this.textContent = useVoxelSprites ? 'Use Textured Sprites' : 'Use Voxel Sprites';
-    update3DScene();
-  };
-
-  document.getElementById('toggleVoxelBg').onclick = function() {
-    useVoxelBg = !useVoxelBg;
-    this.textContent = useVoxelBg ? 'Use Textured Background' : 'Use Voxel Background';
-    update3DScene();
-  };
-
-  document.getElementById('voxelMode').addEventListener('change', function(e) {
-    voxelBgMode = e.target.value;
-    if (useVoxelBg) update3DScene();
-  });
 
   // ===== PALETTE =====
   const fbxPalette = [
@@ -524,5 +463,5 @@ window.addEventListener('DOMContentLoaded', () => {
     [248,216,120],[216,248,120],[184,248,184],[184,248,216],[0,252,252],[248,216,248],[0,0,0],[0,0,0]
   ];
 
-  console.log('Fami3D loaded - Ready for 3D NES visualization');
+  console.log('Fami3D loaded - Optimized performance ready');
 });
