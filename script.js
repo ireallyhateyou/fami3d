@@ -86,29 +86,78 @@ window.addEventListener('DOMContentLoaded', () => {
     const axesHelper = new THREE.AxesHelper(5);
     threeScene.add(axesHelper);
 
-    // Create three flat layers
-    createFlatLayers();
+    // Create 3D background tiles (no flat plane)
+    create3DBackgroundTiles();
 
-    console.log('Three.js setup complete - flat layers');
+    // Sprites as before
+    createSpritePlanes();
+
+    console.log('Three.js setup complete - 3D tiles');
   }
 
-  // ===== FLAT LAYERS =====
-  function createFlatLayers() {
-    const planeGeometry = new THREE.PlaneGeometry(16, 12); // 256/16 = 16, 240/20 = 12
-    
-    // Background plane
-    bgTexture = new THREE.CanvasTexture(bgCanvas);
-    bgTexture.minFilter = THREE.LinearFilter;
-    bgTexture.magFilter = THREE.LinearFilter;
-    const bgMaterial = new THREE.MeshLambertMaterial({ 
-      map: bgTexture,
-      transparent: true,
-      side: THREE.DoubleSide
-    });
-    bgTileGroup = new THREE.Mesh(planeGeometry, bgMaterial);
-    bgTileGroup.position.z = 0;
-    threeScene.add(bgTileGroup);
-    
+  // ===== 3D BACKGROUND TILES (OPTIMIZED) =====
+  let bgTileMeshes = [];
+  let bgTileCanvases = [];
+  let bgTileTextures = [];
+  let lastProminence = [];
+  function create3DBackgroundTiles() {
+    // Only create once
+    if (bgTileMeshes.length) return;
+    bgTileMeshes = [];
+    bgTileCanvases = [];
+    bgTileTextures = [];
+    lastProminence = [];
+    for (let ty = 0; ty < 30; ty++) {
+      bgTileMeshes[ty] = [];
+      bgTileCanvases[ty] = [];
+      bgTileTextures[ty] = [];
+      lastProminence[ty] = [];
+      for (let tx = 0; tx < 32; tx++) {
+        // Canvas and texture for this tile
+        const tileCanvas = document.createElement('canvas');
+        tileCanvas.width = 8;
+        tileCanvas.height = 8;
+        const tileTexture = new THREE.CanvasTexture(tileCanvas);
+        tileTexture.minFilter = THREE.NearestFilter;
+        tileTexture.magFilter = THREE.NearestFilter;
+        const mat = new THREE.MeshLambertMaterial({ map: tileTexture, transparent: true });
+        const geo = new THREE.PlaneGeometry(0.5, 0.5);
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.x = (tx - 16) * 0.5 + 0.25;
+        mesh.position.y = (15 - ty) * 0.5 + 0.25;
+        mesh.position.z = 0;
+        threeScene.add(mesh);
+        bgTileMeshes[ty][tx] = mesh;
+        bgTileCanvases[ty][tx] = tileCanvas;
+        bgTileTextures[ty][tx] = tileTexture;
+        lastProminence[ty][tx] = 0;
+      }
+    }
+  }
+
+  function update3DBackgroundTiles() {
+    if (!bgTileMeshes.length) return;
+    const prominence = getTileProminenceMap(bgCanvas, 8);
+    for (let ty = 0; ty < 30; ty++) {
+      for (let tx = 0; tx < 32; tx++) {
+        // Update tile canvas
+        const tileCanvas = bgTileCanvases[ty][tx];
+        const tileCtx = tileCanvas.getContext('2d');
+        tileCtx.clearRect(0, 0, 8, 8);
+        tileCtx.drawImage(bgCanvas, tx * 8, ty * 8, 8, 8, 0, 0, 8, 8);
+        // Update texture
+        bgTileTextures[ty][tx].needsUpdate = true;
+        // Update Z if prominence changed
+        if (lastProminence[ty][tx] !== prominence[ty][tx]) {
+          bgTileMeshes[ty][tx].position.z = prominence[ty][tx] ? 1 : 0;
+          lastProminence[ty][tx] = prominence[ty][tx];
+        }
+      }
+    }
+  }
+
+  // ===== SPRITE PLANES (unchanged) =====
+  function createSpritePlanes() {
     // Sprite behind plane
     spriteBehindTexture = new THREE.CanvasTexture(spriteBehindCanvas);
     spriteBehindTexture.minFilter = THREE.LinearFilter;
@@ -118,10 +167,9 @@ window.addEventListener('DOMContentLoaded', () => {
       transparent: true,
       side: THREE.DoubleSide
     });
-    spriteTileGroup = new THREE.Mesh(planeGeometry, spriteBehindMaterial);
+    spriteTileGroup = new THREE.Mesh(new THREE.PlaneGeometry(16, 12), spriteBehindMaterial);
     spriteTileGroup.position.z = -1.0; // Behind background
     threeScene.add(spriteTileGroup);
-    
     // Sprite plane
     spriteTexture = new THREE.CanvasTexture(spriteCanvas);
     spriteTexture.minFilter = THREE.LinearFilter;
@@ -131,20 +179,17 @@ window.addEventListener('DOMContentLoaded', () => {
       transparent: true,
       side: THREE.DoubleSide
     });
-    const spritePlane = new THREE.Mesh(planeGeometry, spriteMaterial);
-    spritePlane.position.z = 1.0; // In front of background
+    const spritePlane = new THREE.Mesh(new THREE.PlaneGeometry(16, 12), spriteMaterial);
+    spritePlane.position.z = 2.0; // In front of background
     threeScene.add(spritePlane);
   }
 
   // ===== 3D SCENE UPDATE =====
   function updateThreeScene() {
     if (!use3D || !threeScene) return;
-
-    // Only update textures when they actually changed
-    if (bgTexture) bgTexture.needsUpdate = true;
+    update3DBackgroundTiles();
     if (spriteTexture) spriteTexture.needsUpdate = true;
     if (spriteBehindTexture) spriteBehindTexture.needsUpdate = true;
-
     // Render
     threeRenderer.render(threeScene, threeCamera);
   }
@@ -157,7 +202,6 @@ window.addEventListener('DOMContentLoaded', () => {
       return;
     }
     lastRenderTime = now;
-
     if (nesFrameChanged) {
       drawLayeredCanvases(); // 2D canvas drawing
       if (use3D) {
@@ -244,6 +288,62 @@ window.addEventListener('DOMContentLoaded', () => {
     }
     
     bgCtx.putImageData(bgImageData, 0, 0);
+
+    // === Tile prominence analysis ===
+    const prominence = getTileProminenceMap(bgCanvas, 8);
+    console.log('Tile prominence map:', prominence);
+  }
+
+  // === Tile prominence analysis function ===
+  function getTileProminenceMap(canvas, tileSize = 8) {
+    const ctx = canvas.getContext('2d');
+    const { width, height } = canvas;
+    const imgData = ctx.getImageData(0, 0, width, height).data;
+
+    // 1. Sample background color at (4,4)
+    const bgIdx = (4 * width + 4) * 4;
+    const bgColor = [
+      imgData[bgIdx],
+      imgData[bgIdx + 1],
+      imgData[bgIdx + 2]
+    ];
+
+    // Helper: color distance
+    function colorDist(a, b) {
+      return Math.sqrt(
+        (a[0] - b[0]) ** 2 +
+        (a[1] - b[1]) ** 2 +
+        (a[2] - b[2]) ** 2
+      );
+    }
+
+    const prominence = [];
+    for (let ty = 0; ty < height / tileSize; ty++) {
+      prominence[ty] = [];
+      for (let tx = 0; tx < width / tileSize; tx++) {
+        // Average color of tile
+        let r = 0, g = 0, b = 0, count = 0;
+        for (let y = 0; y < tileSize; y++) {
+          for (let x = 0; x < tileSize; x++) {
+            const px = tx * tileSize + x;
+            const py = ty * tileSize + y;
+            const idx = (py * width + px) * 4;
+            r += imgData[idx];
+            g += imgData[idx + 1];
+            b += imgData[idx + 2];
+            count++;
+          }
+        }
+        r /= count; g /= count; b /= count;
+        const avgColor = [r, g, b];
+
+        // Compare to background
+        const dist = colorDist(avgColor, bgColor);
+        // Threshold: tune as needed (e.g. 16)
+        prominence[ty][tx] = dist > 16 ? 1 : 0;
+      }
+    }
+    return prominence;
   }
 
   function drawSpriteLayer() {
