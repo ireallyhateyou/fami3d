@@ -34,6 +34,7 @@ window.addEventListener('DOMContentLoaded', () => {
   let threeScene, threeRenderer, threeCamera, threeControls;
   let bgTileGroup, spriteTileGroup;
   let bgTexture, spriteTexture, spriteBehindTexture;
+  let bgPanelMesh = null;
 
   // ===== PERFORMANCE OPTIMIZATIONS =====
   const colorCache = new Map();
@@ -59,16 +60,22 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // Camera setup
     threeCamera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
-    threeCamera.position.set(0, 20, 40);
+    threeCamera.position.set(0, 8, 16);
+    threeCamera.lookAt(0, 0, 0);
 
     // Controls setup
     threeControls = new THREE.OrbitControls(threeCamera, threeRenderer.domElement);
     threeControls.enableDamping = true;
     threeControls.dampingFactor = 0.05;
     threeControls.screenSpacePanning = false;
-    threeControls.minDistance = 10;
-    threeControls.maxDistance = 50;
-    threeControls.maxPolarAngle = Math.PI / 2;
+    threeControls.minDistance = 14;
+    threeControls.maxDistance = 22;
+    // Limit vertical angle to about 73° to 107° (in radians)
+    threeControls.minPolarAngle = Math.PI / 2 - 0.3;
+    threeControls.maxPolarAngle = Math.PI / 2 + 0.3;
+    // Limit horizontal angle to ±45° from center
+    threeControls.minAzimuthAngle = -Math.PI / 4;
+    threeControls.maxAzimuthAngle = Math.PI / 4;
 
     // Lighting
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
@@ -89,17 +96,31 @@ window.addEventListener('DOMContentLoaded', () => {
     // Create 3D background tiles (no flat plane)
     create3DBackgroundTiles();
 
+    // Add flat background panel behind tiles
+    if (!bgPanelMesh) {
+      // Start with a default color, will update every frame
+      const bgPanelMaterial = new THREE.MeshLambertMaterial({ color: 0x000000 });
+      const bgPanelGeometry = new THREE.PlaneGeometry(16, 12);
+      bgPanelMesh = new THREE.Mesh(bgPanelGeometry, bgPanelMaterial);
+      bgPanelMesh.position.z = -0.01; // Just behind all tiles
+      threeScene.add(bgPanelMesh);
+      bgPanelMesh.userData.bgPanelMaterial = bgPanelMaterial;
+    }
+
     // Sprites as before
     createSpritePlanes();
 
     console.log('Three.js setup complete - 3D tiles');
   }
 
-  // ===== 3D BACKGROUND TILES (OPTIMIZED) =====
+  // ===== 3D BACKGROUND TILES (OPTIMIZED, BOXES FOR PROMINENT) =====
   let bgTileMeshes = [];
   let bgTileCanvases = [];
   let bgTileTextures = [];
   let lastProminence = [];
+  let lastTileImageData = [];
+  let lastTileIdx = [];
+  let lastTilePal = [];
   function create3DBackgroundTiles() {
     // Only create once
     if (bgTileMeshes.length) return;
@@ -107,11 +128,17 @@ window.addEventListener('DOMContentLoaded', () => {
     bgTileCanvases = [];
     bgTileTextures = [];
     lastProminence = [];
+    lastTileImageData = [];
+    lastTileIdx = [];
+    lastTilePal = [];
     for (let ty = 0; ty < 30; ty++) {
       bgTileMeshes[ty] = [];
       bgTileCanvases[ty] = [];
       bgTileTextures[ty] = [];
       lastProminence[ty] = [];
+      lastTileImageData[ty] = [];
+      lastTileIdx[ty] = [];
+      lastTilePal[ty] = [];
       for (let tx = 0; tx < 32; tx++) {
         // Canvas and texture for this tile
         const tileCanvas = document.createElement('canvas');
@@ -120,9 +147,21 @@ window.addEventListener('DOMContentLoaded', () => {
         const tileTexture = new THREE.CanvasTexture(tileCanvas);
         tileTexture.minFilter = THREE.NearestFilter;
         tileTexture.magFilter = THREE.NearestFilter;
-        const mat = new THREE.MeshLambertMaterial({ map: tileTexture, transparent: true });
-        const geo = new THREE.PlaneGeometry(0.5, 0.5);
-        const mesh = new THREE.Mesh(geo, mat);
+        // Compute average color for side faces
+        const avgColor = getTileAverageColor(bgCanvas, tx, ty, 8);
+        const avgColorHex = `#${((1 << 24) + (avgColor[0] << 16) + (avgColor[1] << 8) + avgColor[2]).toString(16).slice(1)}`;
+        // Materials: front = texture, sides = avg color
+        const matArray = [
+          new THREE.MeshLambertMaterial({ color: avgColorHex }), // right
+          new THREE.MeshLambertMaterial({ color: avgColorHex }), // left
+          new THREE.MeshLambertMaterial({ color: avgColorHex }), // top
+          new THREE.MeshLambertMaterial({ color: avgColorHex }), // bottom
+          new THREE.MeshLambertMaterial({ map: tileTexture, transparent: true }), // front
+          new THREE.MeshLambertMaterial({ color: avgColorHex }) // back
+        ];
+        // Start as a flat plane (z=0, height=0.01)
+        const geo = new THREE.BoxGeometry(0.5, 0.5, 0.01);
+        const mesh = new THREE.Mesh(geo, matArray);
         mesh.position.x = (tx - 16) * 0.5 + 0.25;
         mesh.position.y = (15 - ty) * 0.5 + 0.25;
         mesh.position.z = 0;
@@ -131,6 +170,9 @@ window.addEventListener('DOMContentLoaded', () => {
         bgTileCanvases[ty][tx] = tileCanvas;
         bgTileTextures[ty][tx] = tileTexture;
         lastProminence[ty][tx] = 0;
+        lastTileImageData[ty][tx] = null;
+        lastTileIdx[ty][tx] = null;
+        lastTilePal[ty][tx] = null;
       }
     }
   }
@@ -138,50 +180,164 @@ window.addEventListener('DOMContentLoaded', () => {
   function update3DBackgroundTiles() {
     if (!bgTileMeshes.length) return;
     const prominence = getTileProminenceMap(bgCanvas, 8);
+    let ppu = nes && nes.ppu;
+    // Check if the whole scene is mostly black
+    const sceneCleared = isSceneMostlyBlack(bgCanvas);
     for (let ty = 0; ty < 30; ty++) {
       for (let tx = 0; tx < 32; tx++) {
-        // Update tile canvas
-        const tileCanvas = bgTileCanvases[ty][tx];
-        const tileCtx = tileCanvas.getContext('2d');
-        tileCtx.clearRect(0, 0, 8, 8);
-        tileCtx.drawImage(bgCanvas, tx * 8, ty * 8, 8, 8, 0, 0, 8, 8);
-        // Update texture
-        bgTileTextures[ty][tx].needsUpdate = true;
-        // Update Z if prominence changed
-        if (lastProminence[ty][tx] !== prominence[ty][tx]) {
-          bgTileMeshes[ty][tx].position.z = prominence[ty][tx] ? 1 : 0;
-          lastProminence[ty][tx] = prominence[ty][tx];
+        let tileChanged = false;
+        if (ppu && ppu.vramMem) {
+          const ntAddr = 0x2000 + ty * 32 + tx;
+          const tileIdx = ppu.vramMem[ntAddr];
+          const ntBase = 0x2000 + ((ntAddr - 0x2000) & 0x0C00);
+          const attrTableAddr = ntBase + 0x3C0 + ((ty >> 2) * 8) + (tx >> 2);
+          let attrByte = 0;
+          if (typeof ppu.vramMem[attrTableAddr] === 'number') {
+            attrByte = ppu.vramMem[attrTableAddr];
+          }
+          const shift = ((ty & 2) << 1) | (tx & 2);
+          const palIdx = (attrByte >> shift) & 0x3;
+          if (lastTileIdx[ty][tx] !== tileIdx || lastTilePal[ty][tx] !== palIdx) {
+            tileChanged = true;
+            lastTileIdx[ty][tx] = tileIdx;
+            lastTilePal[ty][tx] = palIdx;
+          }
+        } else {
+          tileChanged = true;
+        }
+        // Update tile canvas/texture if changed
+        if (tileChanged) {
+          const tileCanvas = bgTileCanvases[ty][tx];
+          const tileCtx = tileCanvas.getContext('2d');
+          tileCtx.clearRect(0, 0, 8, 8);
+          tileCtx.drawImage(bgCanvas, tx * 8, ty * 8, 8, 8, 0, 0, 8, 8);
+          bgTileTextures[ty][tx].needsUpdate = true;
+        }
+        // Check if tile is mostly black or scene is mostly black
+        const mesh = bgTileMeshes[ty][tx];
+        let tileInvisible = sceneCleared || isTileMostlyBlack(bgCanvas, tx, ty, 8);
+        if (tileInvisible) {
+          mesh.visible = false;
+        } else {
+          mesh.visible = true;
+          // Update Z and geometry if prominence changed
+          if (lastProminence[ty][tx] !== prominence[ty][tx]) {
+            // Update geometry
+            if (prominence[ty][tx]) {
+              mesh.geometry.dispose();
+              mesh.geometry = new THREE.BoxGeometry(0.5, 0.5, 1.0);
+              mesh.position.z = 0.5;
+            } else {
+              mesh.geometry.dispose();
+              mesh.geometry = new THREE.BoxGeometry(0.5, 0.5, 0.01);
+              mesh.position.z = 0;
+            }
+            // Update side colors to match new tile average color
+            const avgColor = getTileAverageColor(bgCanvas, tx, ty, 8);
+            const avgColorHex = `#${((1 << 24) + (avgColor[0] << 16) + (avgColor[1] << 8) + avgColor[2]).toString(16).slice(1)}`;
+            // Sides: 0,1,2,3,5 (not 4, which is the front texture)
+            [0,1,2,3,5].forEach(i => {
+              if (mesh.material[i]) mesh.material[i].color.set(avgColorHex);
+            });
+            lastProminence[ty][tx] = prominence[ty][tx];
+          }
         }
       }
     }
   }
 
+  // === Helper: get average color of a tile ===
+  function getTileAverageColor(canvas, tx, ty, tileSize) {
+    const ctx = canvas.getContext('2d');
+    const { width } = canvas;
+    const imgData = ctx.getImageData(tx * tileSize, ty * tileSize, tileSize, tileSize).data;
+    let r = 0, g = 0, b = 0, count = 0;
+    for (let i = 0; i < imgData.length; i += 4) {
+      r += imgData[i];
+      g += imgData[i + 1];
+      b += imgData[i + 2];
+      count++;
+    }
+    r = Math.round(r / count);
+    g = Math.round(g / count);
+    b = Math.round(b / count);
+    return [r, g, b];
+  }
+
+  // === Helper: check if a tile is mostly black (98%+) ===
+  function isTileMostlyBlack(canvas, tx, ty, tileSize) {
+    const ctx = canvas.getContext('2d');
+    const imgData = ctx.getImageData(tx * tileSize, ty * tileSize, tileSize, tileSize).data;
+    let blackCount = 0, total = imgData.length / 4;
+    for (let i = 0; i < imgData.length; i += 4) {
+      if (imgData[i] < 8 && imgData[i + 1] < 8 && imgData[i + 2] < 8) blackCount++;
+    }
+    return (blackCount / total) > 0.98;
+  }
+
+  // === Helper: check if the whole scene is mostly black (98%+) ===
+  function isSceneMostlyBlack(canvas) {
+    const ctx = canvas.getContext('2d');
+    const { width, height } = canvas;
+    const imgData = ctx.getImageData(0, 0, width, height).data;
+    let blackCount = 0, total = imgData.length / 4;
+    for (let i = 0; i < imgData.length; i += 4) {
+      if (imgData[i] < 8 && imgData[i + 1] < 8 && imgData[i + 2] < 8) blackCount++;
+    }
+    return (blackCount / total) > 0.98;
+  }
+
+  // Helper: compute sprite extrusion depth based on opaque pixels
+  function getSpriteExtrusionDepth(canvas) {
+    const ctx = canvas.getContext('2d');
+    const imgData = ctx.getImageData(0, 0, 256, 240).data;
+    let opaque = 0, total = 256 * 240;
+    for (let i = 0; i < imgData.length; i += 4) {
+      if (imgData[i + 3] > 32) opaque++;
+    }
+    // Map proportion to depth: min 0.05, max 1.0
+    const prop = opaque / total;
+    return 0.05 + 0.95 * prop;
+  }
+
+  // Store sprite meshes for update
+  let spriteBoxMesh = null;
+  let spriteBehindBoxMesh = null;
+
   // ===== SPRITE PLANES (unchanged) =====
   function createSpritePlanes() {
-    // Sprite behind plane
+    // Sprite behind box
     spriteBehindTexture = new THREE.CanvasTexture(spriteBehindCanvas);
     spriteBehindTexture.minFilter = THREE.LinearFilter;
     spriteBehindTexture.magFilter = THREE.LinearFilter;
-    const spriteBehindMaterial = new THREE.MeshLambertMaterial({ 
-      map: spriteBehindTexture,
-      transparent: true,
-      side: THREE.DoubleSide
-    });
-    spriteTileGroup = new THREE.Mesh(new THREE.PlaneGeometry(16, 12), spriteBehindMaterial);
-    spriteTileGroup.position.z = -1.0; // Behind background
-    threeScene.add(spriteTileGroup);
-    // Sprite plane
+    const spriteBehindMatArray = [
+      new THREE.MeshLambertMaterial({ color: 0x000000 }), // right
+      new THREE.MeshLambertMaterial({ color: 0x000000 }), // left
+      new THREE.MeshLambertMaterial({ color: 0x000000 }), // top
+      new THREE.MeshLambertMaterial({ color: 0x000000 }), // bottom
+      new THREE.MeshLambertMaterial({ map: spriteBehindTexture, transparent: true }), // front
+      new THREE.MeshLambertMaterial({ color: 0x000000 }) // back
+    ];
+    spriteBehindBoxMesh = new THREE.Mesh(new THREE.BoxGeometry(16, 12, 0.1), spriteBehindMatArray);
+    spriteBehindBoxMesh.position.z = -0.6;
+    threeScene.add(spriteBehindBoxMesh);
+    spriteTileGroup = spriteBehindBoxMesh;
+
+    // Sprite box
     spriteTexture = new THREE.CanvasTexture(spriteCanvas);
     spriteTexture.minFilter = THREE.LinearFilter;
     spriteTexture.magFilter = THREE.LinearFilter;
-    const spriteMaterial = new THREE.MeshLambertMaterial({ 
-      map: spriteTexture,
-      transparent: true,
-      side: THREE.DoubleSide
-    });
-    const spritePlane = new THREE.Mesh(new THREE.PlaneGeometry(16, 12), spriteMaterial);
-    spritePlane.position.z = 2.0; // In front of background
-    threeScene.add(spritePlane);
+    const spriteMatArray = [
+      new THREE.MeshLambertMaterial({ color: 0x000000 }), // right
+      new THREE.MeshLambertMaterial({ color: 0x000000 }), // left
+      new THREE.MeshLambertMaterial({ color: 0x000000 }), // top
+      new THREE.MeshLambertMaterial({ color: 0x000000 }), // bottom
+      new THREE.MeshLambertMaterial({ map: spriteTexture, transparent: true }), // front
+      new THREE.MeshLambertMaterial({ color: 0x000000 }) // back
+    ];
+    spriteBoxMesh = new THREE.Mesh(new THREE.BoxGeometry(16, 12, 0.1), spriteMatArray);
+    spriteBoxMesh.position.z = 2.1;
+    threeScene.add(spriteBoxMesh);
   }
 
   // ===== 3D SCENE UPDATE =====
@@ -190,6 +346,26 @@ window.addEventListener('DOMContentLoaded', () => {
     update3DBackgroundTiles();
     if (spriteTexture) spriteTexture.needsUpdate = true;
     if (spriteBehindTexture) spriteBehindTexture.needsUpdate = true;
+    // Update sprite extrusion depth per frame
+    if (spriteBoxMesh) {
+      const depth = getSpriteExtrusionDepth(spriteCanvas);
+      spriteBoxMesh.geometry.dispose();
+      spriteBoxMesh.geometry = new THREE.BoxGeometry(16, 12, depth);
+      spriteBoxMesh.position.z = 2.1 + depth / 2 - 0.05; // keep front face at same z
+    }
+    if (spriteBehindBoxMesh) {
+      const depth = getSpriteExtrusionDepth(spriteBehindCanvas);
+      spriteBehindBoxMesh.geometry.dispose();
+      spriteBehindBoxMesh.geometry = new THREE.BoxGeometry(16, 12, depth);
+      spriteBehindBoxMesh.position.z = -0.6 - (1 - depth) / 2; // keep front face at same z
+    }
+    // Update background panel color to match NES background color (sample top-left pixel)
+    if (bgPanelMesh && bgPanelMesh.userData.bgPanelMaterial) {
+      const ctx = bgCanvas.getContext('2d');
+      const pixel = ctx.getImageData(0, 0, 1, 1).data;
+      const hex = (pixel[0] << 16) | (pixel[1] << 8) | pixel[2];
+      bgPanelMesh.userData.bgPanelMaterial.color.setHex(hex);
+    }
     // Render
     threeRenderer.render(threeScene, threeCamera);
   }
@@ -506,11 +682,62 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('startBtn').onclick = function() {
     if (!romData) return;
     if (animationId) cancelAnimationFrame(animationId);
-    
+    // Re-initialize NES canvas and imageData for a clean start
+    const nesCanvas = document.createElement('canvas');
+    nesCanvas.width = 256;
+    nesCanvas.height = 240;
+    const ctx = nesCanvas.getContext('2d');
+    let imageData = ctx.getImageData(0, 0, 256, 240);
+    window.nesCanvas = nesCanvas; // for debugging
+    window.nesCtx = ctx;
+    window.nesImageData = imageData;
+
+    // Reset tile caches and mesh visibility
+    if (typeof lastTileImageData !== 'undefined') {
+      for (let ty = 0; ty < lastTileImageData.length; ty++) {
+        if (lastTileImageData[ty]) {
+          for (let tx = 0; tx < lastTileImageData[ty].length; tx++) {
+            lastTileImageData[ty][tx] = null;
+            if (bgTileMeshes[ty] && bgTileMeshes[ty][tx]) {
+              bgTileMeshes[ty][tx].visible = true;
+            }
+          }
+        }
+      }
+    }
+    if (typeof lastTileIdx !== 'undefined') {
+      for (let ty = 0; ty < lastTileIdx.length; ty++) {
+        if (lastTileIdx[ty]) {
+          for (let tx = 0; tx < lastTileIdx[ty].length; tx++) {
+            lastTileIdx[ty][tx] = null;
+          }
+        }
+      }
+    }
+    if (typeof lastTilePal !== 'undefined') {
+      for (let ty = 0; ty < lastTilePal.length; ty++) {
+        if (lastTilePal[ty]) {
+          for (let tx = 0; tx < lastTilePal[ty].length; tx++) {
+            lastTilePal[ty][tx] = null;
+          }
+        }
+      }
+    }
+    if (typeof lastProminence !== 'undefined') {
+      for (let ty = 0; ty < lastProminence.length; ty++) {
+        if (lastProminence[ty]) {
+          for (let tx = 0; tx < lastProminence[ty].length; tx++) {
+            lastProminence[ty][tx] = null;
+          }
+        }
+      }
+    }
+
     console.log('Starting NES emulator...');
     nes = new jsnes.NES({
       palette: fbxPalette,
       onFrame: function(buffer) {
+        if (!imageData || !ctx) return;
         for (let i = 0; i < 256 * 240; i++) {
           const c = buffer[i];
           imageData.data[i * 4 + 0] = c & 0xFF;
@@ -520,12 +747,20 @@ window.addEventListener('DOMContentLoaded', () => {
         }
         ctx.putImageData(imageData, 0, 0);
         nesFrameChanged = true;
+        // Invalidate all cached tile images so they update on next 3D update
+        if (lastTileImageData && lastTileImageData.length) {
+          for (let ty = 0; ty < lastTileImageData.length; ty++) {
+            if (lastTileImageData[ty]) {
+              for (let tx = 0; tx < lastTileImageData[ty].length; tx++) {
+                lastTileImageData[ty][tx] = null;
+              }
+            }
+          }
+        }
       }
     });
-    
     nes.loadROM(romData);
     window.nes = nes;
-    
     let lastTime = 0;
     function frameLoop(now) {
       if (!lastTime || now - lastTime >= 1000 / 60) {
@@ -535,7 +770,6 @@ window.addEventListener('DOMContentLoaded', () => {
       animationId = requestAnimationFrame(frameLoop);
     }
     requestAnimationFrame(frameLoop);
-    
     // Start main render loop
     renderFrame(0);
   };
