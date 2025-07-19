@@ -1,4 +1,3 @@
-
 window.addEventListener('DOMContentLoaded', () => {
   console.log('DOMContentLoaded fired');
 
@@ -34,7 +33,7 @@ let animationId = null;
 let romData = null;
 
   // ===== CENTRAL STATE FLAGS =====
-  let use3D = false;
+  let use3D = true; // Always use 3D mode
   let nesFrameChanged = false;
   let lastRenderTime = 0;
   const TARGET_FPS = 60;
@@ -88,7 +87,7 @@ let romData = null;
     
     // Renderer setup
     threeRenderer = new THREE.WebGLRenderer({ antialias: true });
-    threeRenderer.setSize(container.clientWidth, container.clientHeight);
+    threeRenderer.setSize(window.innerWidth, window.innerHeight);
     container.appendChild(threeRenderer.domElement);
   
   // Scene setup
@@ -96,7 +95,7 @@ let romData = null;
     threeScene.background = new THREE.Color(0x0a0a0a);
 
     // Camera setup
-    threeCamera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+    threeCamera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
     threeCamera.position.set(0, 8, 16);
     threeCamera.lookAt(0, 0, 0);
 
@@ -1133,6 +1132,315 @@ function getSpriteColor(ppu, palIdx, colorIdx) {
 
   // ===== AUDIO SETUP =====
   let nesAudioPlayer = null;
+  let isMuted = false;
+
+  // ===== MUTE BUTTON FUNCTIONALITY =====
+  document.getElementById('muteBtn').addEventListener('click', function() {
+    isMuted = !isMuted;
+    const muteBtn = document.getElementById('muteBtn');
+    
+    if (isMuted) {
+      muteBtn.textContent = '🔇';
+      muteBtn.title = 'Unmute';
+      // Mute the audio context
+      if (nesAudioPlayer && nesAudioPlayer.ctx) {
+        nesAudioPlayer.ctx.suspend();
+      }
+    } else {
+      muteBtn.textContent = '🔊';
+      muteBtn.title = 'Mute';
+      // Unmute the audio context
+      if (nesAudioPlayer && nesAudioPlayer.ctx) {
+        nesAudioPlayer.ctx.resume();
+      }
+    }
+  });
+
+  // ===== KEYBOARD CONTROLS =====
+  let isPaused = false;
+  let keyStates = {
+    up: false,
+    down: false,
+    left: false,
+    right: false,
+    a: false,
+    b: false,
+    start: false,
+    select: false
+  };
+
+  // Keyboard event handlers
+  function setupKeyboardControls() {
+    console.log('Setting up keyboard controls...');
+    
+    document.addEventListener('keydown', function(e) {
+      console.log('Keydown event fired:', e.code);
+      
+      if (!nes) {
+        console.log('NES not loaded yet');
+        return;
+      }
+      
+      console.log('Key pressed:', e.code);
+      
+      switch(e.code) {
+        case 'ArrowUp':
+          if (!keyStates.up) {
+            console.log('Up pressed');
+            if (typeof nes.buttonDown === 'function') {
+              nes.buttonDown(1, jsnes.Controller.BUTTON_UP);
+              console.log('Called nes.buttonDown(1, jsnes.Controller.BUTTON_UP)');
+              
+              // Keep button pressed for longer so Donkey Kong registers it
+              setTimeout(() => {
+                if (typeof nes.buttonUp === 'function') {
+                  nes.buttonUp(1, jsnes.Controller.BUTTON_UP);
+                  console.log('Released UP button after delay');
+                }
+              }, 150); // Keep pressed for 150ms
+            }
+            keyStates.up = true;
+          }
+          break;
+        case 'ArrowDown':
+          if (!keyStates.down) {
+            console.log('Down pressed');
+            if (typeof nes.buttonDown === 'function') {
+              nes.buttonDown(1, jsnes.Controller.BUTTON_DOWN);
+              console.log('Called nes.buttonDown(1, jsnes.Controller.BUTTON_DOWN)');
+              
+              // Keep button pressed for longer so Donkey Kong registers it
+              setTimeout(() => {
+                if (typeof nes.buttonUp === 'function') {
+                  nes.buttonUp(1, jsnes.Controller.BUTTON_DOWN);
+                  console.log('Released DOWN button after delay');
+                }
+              }, 150); // Keep pressed for 150ms
+            }
+            keyStates.down = true;
+          }
+          break;
+        case 'ArrowLeft':
+          if (!keyStates.left) {
+            console.log('Left pressed');
+            if (typeof nes.buttonDown === 'function') {
+              nes.buttonDown(1, jsnes.Controller.BUTTON_LEFT);
+              console.log('Called nes.buttonDown(1, jsnes.Controller.BUTTON_LEFT)');
+              
+              // Keep button pressed for longer so Donkey Kong registers it
+              setTimeout(() => {
+                if (typeof nes.buttonUp === 'function') {
+                  nes.buttonUp(1, jsnes.Controller.BUTTON_LEFT);
+                  console.log('Released LEFT button after delay');
+                }
+              }, 150); // Keep pressed for 150ms
+            }
+            keyStates.left = true;
+          }
+          break;
+        case 'ArrowRight':
+          if (!keyStates.right) {
+            console.log('Right pressed');
+            if (typeof nes.buttonDown === 'function') {
+              nes.buttonDown(1, jsnes.Controller.BUTTON_RIGHT);
+              console.log('Called nes.buttonDown(1, jsnes.Controller.BUTTON_RIGHT)');
+              
+              // Keep button pressed for longer so Donkey Kong registers it
+              setTimeout(() => {
+                if (typeof nes.buttonUp === 'function') {
+                  nes.buttonUp(1, jsnes.Controller.BUTTON_RIGHT);
+                  console.log('Released RIGHT button after delay');
+                }
+              }, 150); // Keep pressed for 150ms
+            }
+            keyStates.right = true;
+          }
+          break;
+        case 'KeyZ':
+          if (!keyStates.a) {
+            console.log('A pressed');
+            if (typeof nes.buttonDown === 'function') {
+              nes.buttonDown(1, jsnes.Controller.BUTTON_A);
+              console.log('Called nes.buttonDown(1, jsnes.Controller.BUTTON_A)');
+              
+              // Keep button pressed for longer so Donkey Kong registers it
+              setTimeout(() => {
+                if (typeof nes.buttonUp === 'function') {
+                  nes.buttonUp(1, jsnes.Controller.BUTTON_A);
+                  console.log('Released A button after delay');
+                }
+              }, 150); // Keep pressed for 150ms
+            }
+            keyStates.a = true;
+          }
+          break;
+        case 'KeyX':
+          if (!keyStates.b) {
+            console.log('B pressed');
+            if (typeof nes.buttonDown === 'function') {
+              nes.buttonDown(1, jsnes.Controller.BUTTON_B);
+              console.log('Called nes.buttonDown(1, jsnes.Controller.BUTTON_B)');
+              
+              // Keep button pressed for longer so Donkey Kong registers it
+              setTimeout(() => {
+                if (typeof nes.buttonUp === 'function') {
+                  nes.buttonUp(1, jsnes.Controller.BUTTON_B);
+                  console.log('Released B button after delay');
+                }
+              }, 150); // Keep pressed for 150ms
+            }
+            keyStates.b = true;
+          }
+          break;
+        case 'Enter':
+          if (!keyStates.start) {
+            console.log('Start pressed');
+            if (typeof nes.buttonDown === 'function') {
+              nes.buttonDown(1, jsnes.Controller.BUTTON_START);
+              console.log('Called nes.buttonDown(1, jsnes.Controller.BUTTON_START)');
+              
+              // Keep button pressed for longer so Donkey Kong registers it
+              setTimeout(() => {
+                if (typeof nes.buttonUp === 'function') {
+                  nes.buttonUp(1, jsnes.Controller.BUTTON_START);
+                  console.log('Released Start button after delay');
+                }
+              }, 200); // Keep pressed for 200ms
+            }
+            keyStates.start = true;
+          }
+          break;
+        case 'ShiftLeft':
+        case 'ShiftRight':
+          if (!keyStates.select) {
+            console.log('Select pressed');
+            console.log('Button index:', jsnes.Controller.BUTTON_SELECT);
+            console.log('Button name: SELECT');
+            if (typeof nes.buttonDown === 'function') {
+              nes.buttonDown(1, jsnes.Controller.BUTTON_SELECT);
+              console.log('Called nes.buttonDown(1, jsnes.Controller.BUTTON_SELECT)');
+            }
+            keyStates.select = true;
+          }
+          break;
+        case 'Space':
+          e.preventDefault();
+          console.log('Space pressed - toggling pause');
+          isPaused = !isPaused;
+          if (isPaused) {
+            cancelAnimationFrame(animationId);
+          } else {
+            requestAnimationFrame(frameLoop);
+          }
+          break;
+      }
+    });
+
+    document.addEventListener('keyup', function(e) {
+      if (!nes) return;
+      
+      switch(e.code) {
+        case 'ArrowUp':
+          if (keyStates.up) {
+            console.log('Up released');
+            if (typeof nes.buttonUp === 'function') {
+              nes.buttonUp(1, jsnes.Controller.BUTTON_UP);
+              console.log('Called nes.buttonUp(1, jsnes.Controller.BUTTON_UP)');
+            }
+            keyStates.up = false;
+          }
+          break;
+        case 'ArrowDown':
+          if (keyStates.down) {
+            console.log('Down released');
+            if (typeof nes.buttonUp === 'function') {
+              nes.buttonUp(1, jsnes.Controller.BUTTON_DOWN);
+              console.log('Called nes.buttonUp(1, jsnes.Controller.BUTTON_DOWN)');
+            }
+            keyStates.down = false;
+          }
+          break;
+        case 'ArrowLeft':
+          if (keyStates.left) {
+            console.log('Left released');
+            if (typeof nes.buttonUp === 'function') {
+              nes.buttonUp(1, jsnes.Controller.BUTTON_LEFT);
+              console.log('Called nes.buttonUp(1, jsnes.Controller.BUTTON_LEFT)');
+            }
+            keyStates.left = false;
+          }
+          break;
+        case 'ArrowRight':
+          if (keyStates.right) {
+            console.log('Right released');
+            if (typeof nes.buttonUp === 'function') {
+              nes.buttonUp(1, jsnes.Controller.BUTTON_RIGHT);
+              console.log('Called nes.buttonUp(1, jsnes.Controller.BUTTON_RIGHT)');
+            }
+            keyStates.right = false;
+          }
+          break;
+        case 'KeyZ':
+          if (keyStates.a) {
+            console.log('A released');
+            if (typeof nes.buttonUp === 'function') {
+              nes.buttonUp(1, jsnes.Controller.BUTTON_A);
+              console.log('Called nes.buttonUp(1, jsnes.Controller.BUTTON_A)');
+            }
+            keyStates.a = false;
+          }
+          break;
+        case 'KeyX':
+          if (keyStates.b) {
+            console.log('B released');
+            if (typeof nes.buttonUp === 'function') {
+              nes.buttonUp(1, jsnes.Controller.BUTTON_B);
+              console.log('Called nes.buttonUp(1, jsnes.Controller.BUTTON_B)');
+            }
+            keyStates.b = false;
+          }
+          break;
+        case 'Enter':
+          if (keyStates.start) {
+            console.log('Start released');
+            if (typeof nes.buttonUp === 'function') {
+              nes.buttonUp(1, jsnes.Controller.BUTTON_START);
+              console.log('Called nes.buttonUp(1, jsnes.Controller.BUTTON_START)');
+            }
+            keyStates.start = false;
+          }
+          break;
+        case 'ShiftLeft':
+        case 'ShiftRight':
+          if (keyStates.select) {
+            console.log('Select released');
+            if (typeof nes.buttonUp === 'function') {
+              nes.buttonUp(1, jsnes.Controller.BUTTON_SELECT);
+              console.log('Called nes.buttonUp(1, jsnes.Controller.BUTTON_SELECT)');
+            }
+            keyStates.select = false;
+          }
+          break;
+      }
+    });
+  }
+
+  // Setup keyboard controls immediately
+  try {
+    console.log('About to setup keyboard controls...');
+    console.log('Document ready state:', document.readyState);
+    console.log('Document body exists:', !!document.body);
+    
+    // Test if keyboard events work at all
+    document.addEventListener('keydown', function(e) {
+      console.log('TEST: Keydown detected:', e.code);
+    });
+    
+    setupKeyboardControls();
+    console.log('Keyboard controls setup complete');
+  } catch (error) {
+    console.error('Error setting up keyboard controls:', error);
+  }
 
   // ===== BACKGROUND COLOR UPDATE TIMER =====
   let bgPanelColorTimer = null;
@@ -1231,11 +1539,46 @@ function getSpriteColor(ppu, palIdx, colorIdx) {
     });
     nes.loadROM(romData);
     window.nes = nes;
+    
+    // Debug: Check if NES object has button methods
+    console.log('NES object created:', nes);
+    console.log('NES buttonDown method:', typeof nes.buttonDown);
+    console.log('NES buttonUp method:', typeof nes.buttonUp);
+    console.log('All NES methods:', Object.getOwnPropertyNames(nes));
+    console.log('NES controller methods:', Object.getOwnPropertyNames(nes.controller1 || {}));
+    
+    // Debug: Check controllers structure
+    console.log('nes.controllers:', nes.controllers);
+    console.log('nes.controllers keys:', Object.keys(nes.controllers || {}));
+    console.log('nes.controllers[1]:', nes.controllers && nes.controllers[1]);
+    console.log('nes.controllers[1].state:', nes.controllers && nes.controllers[1] && nes.controllers[1].state);
+    
+    // Debug: Check jsnes.Controller constants
+    console.log('jsnes.Controller:', jsnes.Controller);
+    console.log('jsnes.Controller.BUTTON_UP:', jsnes.Controller.BUTTON_UP);
+    console.log('jsnes.Controller.BUTTON_DOWN:', jsnes.Controller.BUTTON_DOWN);
+    console.log('jsnes.Controller.BUTTON_LEFT:', jsnes.Controller.BUTTON_LEFT);
+    console.log('jsnes.Controller.BUTTON_RIGHT:', jsnes.Controller.BUTTON_RIGHT);
+    console.log('jsnes.Controller.BUTTON_A:', jsnes.Controller.BUTTON_A);
+    console.log('jsnes.Controller.BUTTON_B:', jsnes.Controller.BUTTON_B);
+    console.log('jsnes.Controller.BUTTON_START:', jsnes.Controller.BUTTON_START);
+    console.log('jsnes.Controller.BUTTON_SELECT:', jsnes.Controller.BUTTON_SELECT);
+    
+    // Debug: Check all properties of jsnes.Controller
+    console.log('All jsnes.Controller properties:', Object.getOwnPropertyNames(jsnes.Controller));
+    
+    // Debug: Try to find button constants
+    for (let prop in jsnes.Controller) {
+      console.log(`jsnes.Controller.${prop}:`, jsnes.Controller[prop]);
+    }
+    
     let lastTime = 0;
     function frameLoop(now) {
-      if (!lastTime || now - lastTime >= 1000 / 60) {
-        nes.frame();
-        lastTime = now;
+      if (!isPaused) {
+        if (!lastTime || now - lastTime >= 1000 / 60) {
+          nes.frame();
+          lastTime = now;
+        }
       }
       animationId = requestAnimationFrame(frameLoop);
     }
@@ -1263,15 +1606,20 @@ function getSpriteColor(ppu, palIdx, colorIdx) {
   };
 
   // ===== TOGGLE BUTTON BEHAVIOR =====
-  document.getElementById('toggle3d').onclick = () => {
-    use3D = !use3D;
-    const container = document.getElementById('threejs-container');
-    container.style.display = use3D ? 'block' : 'none';
-    
-    if (use3D && !threeScene) {
-      setupThreeJS();
+  // Removed toggle 3D button behavior
+
+  // ===== AUTO-SETUP THREE.JS =====
+  // Setup Three.js automatically since 3D is always active
+  setupThreeJS();
+
+  // Handle window resize for full-screen rendering
+  window.addEventListener('resize', () => {
+    if (threeRenderer && threeCamera) {
+      threeRenderer.setSize(window.innerWidth, window.innerHeight);
+      threeCamera.aspect = window.innerWidth / window.innerHeight;
+      threeCamera.updateProjectionMatrix();
     }
-  };
+  });
 
   // ===== PALETTE =====
   const fbxPalette = [

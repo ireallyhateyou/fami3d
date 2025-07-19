@@ -18,9 +18,77 @@
       top: 10px;
       left: 10px;
       z-index: 100;
-      background: rgba(0,0,0,0.7);
-      padding: 10px;
-      border-radius: 5px;
+      background: rgba(0,0,0,0.8);
+      padding: 15px;
+      border-radius: 8px;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .controls-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .controls-row:last-child {
+      margin-bottom: 0;
+    }
+    button {
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.2s ease;
+    }
+    button:hover {
+      background: rgba(255,255,255,0.2);
+      border-color: rgba(255,255,255,0.3);
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    #helpBtn {
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+    }
+    #menuBtn {
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      line-height: 1;
+    }
+    #romfile {
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    #romfile:hover {
+      background: rgba(255,255,255,0.2);
+      border-color: rgba(255,255,255,0.3);
+    }
+    #romfile::-webkit-file-upload-button {
+      background: transparent;
+      border: none;
+      color: #fff;
+      cursor: pointer;
+      font-size: 14px;
     }
     .canvas-container {
       position: relative;
@@ -29,6 +97,7 @@
       margin: 20px auto;
       display: flex;
       gap: 10px;
+      visibility: hidden; /* Completely hide the canvas container */
     }
     canvas {
       position: relative;
@@ -41,11 +110,14 @@
     #spriteCanvas { order: 2; }
     #spriteBehindCanvas { order: 3; }
     #threejs-container {
-      width: 800px;
-      height: 600px;
+      width: 100vw;
+      height: 100vh;
       background: #000;
-      margin: 20px auto;
-      border: 1px solid #444;
+      margin: 0;
+      border: none;
+      position: fixed;
+      top: 0;
+      left: 0;
     }
     #helpModal {
       display: none;
@@ -63,20 +135,107 @@
     #helpModal.show {
       display: flex;
     }
+    #helpModal input[type="file"] {
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    #helpModal input[type="file"]:hover {
+      background: rgba(255,255,255,0.2);
+      border-color: rgba(255,255,255,0.3);
+    }
+    #helpModal input[type="file"]::-webkit-file-upload-button {
+      background: transparent;
+      border: none;
+      color: #fff;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    #helpModal button {
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.2s ease;
+    }
+    #helpModal button:hover {
+      background: rgba(255,255,255,0.2);
+      border-color: rgba(255,255,255,0.3);
+    }
+    #helpModal button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    #helpModal h3, #helpModal h4 {
+      color: #fff;
+      margin: 0;
+    }
+    #helpModal ul {
+      color: #ccc;
+    }
+    #helpModal p {
+      color: #ccc;
+    }
   </style>
 </head>
 <body>
   <div id="controls">
-    <input type="file" id="romfile" accept=".nes" />
-    <button id="helpBtn" title="Help">?</button>
-    <button id="startBtn" disabled>Start</button>
-    <button id="toggle3d">Toggle 3D</button>
+    <div class="controls-row">
+      <button id="helpBtn" title="Help">?</button>
+      <button id="menuBtn" title="Menu">☰</button>
+      <button id="muteBtn" title="Mute">🔊</button>
+    </div>
+    <div class="controls-row">
+      <input type="file" id="romfile" accept=".nes" />
+      <button id="startBtn" disabled>Start</button>
+    </div>
   </div>
   <div id="helpModal">
-    <div style="background:#222; color:#fff; padding:24px 32px; border-radius:8px; max-width:400px; margin:auto; position:relative; box-shadow:0 4px 32px #000;">
+    <div style="background:#222; color:#fff; padding:24px 32px; border-radius:8px; max-width:500px; margin:auto; position:relative; box-shadow:0 4px 32px #000;">
       <button id="closeHelpModal" style="position:absolute; top:8px; right:12px; background:none; border:none; color:#fff; font-size:1.5em; cursor:pointer;">&times;</button>
       <div style="margin-top:8px; font-size:1.1em; line-height:1.5;">
-        If you DON'T want to get your hands on a ROM, NEVER either Google it, if you need help DO NOT go on the <a href="https://hackclub.slack.com/archives/CMG6P6RE1" target="_blank" style="color:#4af;"><b>#piracy</b></a> channel in the Hack Club Slack!
+        <h3 style="margin-top:0; margin-bottom:16px;">fami3D Controls</h3>
+        
+        <div style="margin-bottom:20px;">
+          <h4 style="margin-bottom:8px;">3D Camera Controls</h4>
+          <ul style="margin:0; padding-left:20px;">
+            <li><strong>Mouse:</strong> Click and drag to rotate camera</li>
+            <li><strong>Scroll:</strong> Zoom in/out</li>
+            <li><strong>Right-click:</strong> Pan camera</li>
+          </ul>
+        </div>
+
+        <div style="margin-bottom:20px;">
+          <h4 style="margin-bottom:8px;">NES Emulator Controls</h4>
+          <ul style="margin:0; padding-left:20px;">
+            <li><strong>Arrow Keys:</strong> D-pad</li>
+            <li><strong>Z:</strong> A button</li>
+            <li><strong>X:</strong> B button</li>
+            <li><strong>Enter:</strong> Start button</li>
+            <li><strong>Shift:</strong> Select button</li>
+            <li><strong>Space:</strong> Pause/Resume</li>
+          </ul>
+        </div>
+
+        <div style="margin-bottom:20px;">
+          <h4 style="margin-bottom:8px;">Audio</h4>
+          <p style="margin:0;">Use the 🔊 button in the top-left to mute/unmute the NES audio.</p>
+        </div>
+
+        <div style="margin-bottom:0;">
+          <h4 style="margin-bottom:8px;">About</h4>
+          <p style="margin:0; font-size:0.9em; opacity:0.8;">
+            If you DON'T want to get your hands on a ROM, NEVER either Google it, if you need help DO NOT go on the <a href="https://hackclub.slack.com/archives/CMG6P6RE1" target="_blank" style="color:#4af;"><b>#piracy</b></a> channel in the Hack Club Slack!
+          </p>
+        </div>
       </div>
     </div>
   </div>
@@ -85,7 +244,7 @@
     <canvas id="spriteBehindCanvas" width="256" height="240"></canvas>
     <canvas id="spriteCanvas" width="256" height="240"></canvas>
   </div>
-  <div id="threejs-container" style="display: none;"></div>
+  <div id="threejs-container"></div>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128/examples/js/utils/BufferGeometryUtils.js"></script>
   <script src="script.js"></script>
