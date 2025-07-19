@@ -47,13 +47,38 @@
       margin: 20px auto;
       border: 1px solid #444;
     }
+    #helpModal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0,0,0,0.6);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+      /* flex centering, but display: flex will be set by .show class */
+    }
+    #helpModal.show {
+      display: flex;
+    }
   </style>
 </head>
 <body>
   <div id="controls">
     <input type="file" id="romfile" accept=".nes" />
+    <button id="helpBtn" title="Help">?</button>
     <button id="startBtn" disabled>Start</button>
     <button id="toggle3d">Toggle 3D</button>
+  </div>
+  <div id="helpModal">
+    <div style="background:#222; color:#fff; padding:24px 32px; border-radius:8px; max-width:400px; margin:auto; position:relative; box-shadow:0 4px 32px #000;">
+      <button id="closeHelpModal" style="position:absolute; top:8px; right:12px; background:none; border:none; color:#fff; font-size:1.5em; cursor:pointer;">&times;</button>
+      <div style="margin-top:8px; font-size:1.1em; line-height:1.5;">
+        If you DON'T want to get your hands on a ROM, NEVER either Google it, if you need help DO NOT go on the <a href="https://hackclub.slack.com/archives/CMG6P6RE1" target="_blank" style="color:#4af;"><b>#piracy</b></a> channel in the Hack Club Slack!
+      </div>
+    </div>
   </div>
   <div class="canvas-container">
     <canvas id="bgCanvas" width="256" height="240"></canvas>
