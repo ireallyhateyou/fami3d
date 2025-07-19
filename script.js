@@ -1158,271 +1158,32 @@ function getSpriteColor(ppu, palIdx, colorIdx) {
 
   // ===== KEYBOARD CONTROLS =====
   let isPaused = false;
-  let keyStates = {
-    up: false,
-    down: false,
-    left: false,
-    right: false,
-    a: false,
-    b: false,
-    start: false,
-    select: false
-  };
 
-  // Keyboard event handlers
-  function setupKeyboardControls() {
-    console.log('Setting up keyboard controls...');
-    
-    document.addEventListener('keydown', function(e) {
-      console.log('Keydown event fired:', e.code);
-      
-      if (!nes) {
-        console.log('NES not loaded yet');
-        return;
-      }
-      
-      console.log('Key pressed:', e.code);
-      
-      switch(e.code) {
-        case 'ArrowUp':
-          if (!keyStates.up) {
-            console.log('Up pressed');
-            if (typeof nes.buttonDown === 'function') {
-              nes.buttonDown(1, jsnes.Controller.BUTTON_UP);
-              console.log('Called nes.buttonDown(1, jsnes.Controller.BUTTON_UP)');
-              
-              // Keep button pressed for longer so Donkey Kong registers it
-              setTimeout(() => {
-                if (typeof nes.buttonUp === 'function') {
-                  nes.buttonUp(1, jsnes.Controller.BUTTON_UP);
-                  console.log('Released UP button after delay');
-                }
-              }, 150); // Keep pressed for 150ms
-            }
-            keyStates.up = true;
-          }
-          break;
-        case 'ArrowDown':
-          if (!keyStates.down) {
-            console.log('Down pressed');
-            if (typeof nes.buttonDown === 'function') {
-              nes.buttonDown(1, jsnes.Controller.BUTTON_DOWN);
-              console.log('Called nes.buttonDown(1, jsnes.Controller.BUTTON_DOWN)');
-              
-              // Keep button pressed for longer so Donkey Kong registers it
-              setTimeout(() => {
-                if (typeof nes.buttonUp === 'function') {
-                  nes.buttonUp(1, jsnes.Controller.BUTTON_DOWN);
-                  console.log('Released DOWN button after delay');
-                }
-              }, 150); // Keep pressed for 150ms
-            }
-            keyStates.down = true;
-          }
-          break;
-        case 'ArrowLeft':
-          if (!keyStates.left) {
-            console.log('Left pressed');
-            if (typeof nes.buttonDown === 'function') {
-              nes.buttonDown(1, jsnes.Controller.BUTTON_LEFT);
-              console.log('Called nes.buttonDown(1, jsnes.Controller.BUTTON_LEFT)');
-              
-              // Keep button pressed for longer so Donkey Kong registers it
-              setTimeout(() => {
-                if (typeof nes.buttonUp === 'function') {
-                  nes.buttonUp(1, jsnes.Controller.BUTTON_LEFT);
-                  console.log('Released LEFT button after delay');
-                }
-              }, 150); // Keep pressed for 150ms
-            }
-            keyStates.left = true;
-          }
-          break;
-        case 'ArrowRight':
-          if (!keyStates.right) {
-            console.log('Right pressed');
-            if (typeof nes.buttonDown === 'function') {
-              nes.buttonDown(1, jsnes.Controller.BUTTON_RIGHT);
-              console.log('Called nes.buttonDown(1, jsnes.Controller.BUTTON_RIGHT)');
-              
-              // Keep button pressed for longer so Donkey Kong registers it
-              setTimeout(() => {
-                if (typeof nes.buttonUp === 'function') {
-                  nes.buttonUp(1, jsnes.Controller.BUTTON_RIGHT);
-                  console.log('Released RIGHT button after delay');
-                }
-              }, 150); // Keep pressed for 150ms
-            }
-            keyStates.right = true;
-          }
-          break;
-        case 'KeyZ':
-          if (!keyStates.a) {
-            console.log('A pressed');
-            if (typeof nes.buttonDown === 'function') {
-              nes.buttonDown(1, jsnes.Controller.BUTTON_A);
-              console.log('Called nes.buttonDown(1, jsnes.Controller.BUTTON_A)');
-              
-              // Keep button pressed for longer so Donkey Kong registers it
-              setTimeout(() => {
-                if (typeof nes.buttonUp === 'function') {
-                  nes.buttonUp(1, jsnes.Controller.BUTTON_A);
-                  console.log('Released A button after delay');
-                }
-              }, 150); // Keep pressed for 150ms
-            }
-            keyStates.a = true;
-          }
-          break;
-        case 'KeyX':
-          if (!keyStates.b) {
-            console.log('B pressed');
-            if (typeof nes.buttonDown === 'function') {
-              nes.buttonDown(1, jsnes.Controller.BUTTON_B);
-              console.log('Called nes.buttonDown(1, jsnes.Controller.BUTTON_B)');
-              
-              // Keep button pressed for longer so Donkey Kong registers it
-              setTimeout(() => {
-                if (typeof nes.buttonUp === 'function') {
-                  nes.buttonUp(1, jsnes.Controller.BUTTON_B);
-                  console.log('Released B button after delay');
-                }
-              }, 150); // Keep pressed for 150ms
-            }
-            keyStates.b = true;
-          }
-          break;
-        case 'Enter':
-          if (!keyStates.start) {
-            console.log('Start pressed');
-            if (typeof nes.buttonDown === 'function') {
-              nes.buttonDown(1, jsnes.Controller.BUTTON_START);
-              console.log('Called nes.buttonDown(1, jsnes.Controller.BUTTON_START)');
-              
-              // Keep button pressed for longer so Donkey Kong registers it
-              setTimeout(() => {
-                if (typeof nes.buttonUp === 'function') {
-                  nes.buttonUp(1, jsnes.Controller.BUTTON_START);
-                  console.log('Released Start button after delay');
-                }
-              }, 200); // Keep pressed for 200ms
-            }
-            keyStates.start = true;
-          }
-          break;
-        case 'ShiftLeft':
-        case 'ShiftRight':
-          if (!keyStates.select) {
-            console.log('Select pressed');
-            console.log('Button index:', jsnes.Controller.BUTTON_SELECT);
-            console.log('Button name: SELECT');
-            if (typeof nes.buttonDown === 'function') {
-              nes.buttonDown(1, jsnes.Controller.BUTTON_SELECT);
-              console.log('Called nes.buttonDown(1, jsnes.Controller.BUTTON_SELECT)');
-            }
-            keyStates.select = true;
-          }
-          break;
-        case 'Space':
-          e.preventDefault();
-          console.log('Space pressed - toggling pause');
-          isPaused = !isPaused;
-          if (isPaused) {
-            cancelAnimationFrame(animationId);
-          } else {
-            requestAnimationFrame(frameLoop);
-          }
-          break;
-      }
-    });
-
-    document.addEventListener('keyup', function(e) {
-      if (!nes) return;
-      
-      switch(e.code) {
-        case 'ArrowUp':
-          if (keyStates.up) {
-            console.log('Up released');
-            if (typeof nes.buttonUp === 'function') {
-              nes.buttonUp(1, jsnes.Controller.BUTTON_UP);
-              console.log('Called nes.buttonUp(1, jsnes.Controller.BUTTON_UP)');
-            }
-            keyStates.up = false;
-          }
-          break;
-        case 'ArrowDown':
-          if (keyStates.down) {
-            console.log('Down released');
-            if (typeof nes.buttonUp === 'function') {
-              nes.buttonUp(1, jsnes.Controller.BUTTON_DOWN);
-              console.log('Called nes.buttonUp(1, jsnes.Controller.BUTTON_DOWN)');
-            }
-            keyStates.down = false;
-          }
-          break;
-        case 'ArrowLeft':
-          if (keyStates.left) {
-            console.log('Left released');
-            if (typeof nes.buttonUp === 'function') {
-              nes.buttonUp(1, jsnes.Controller.BUTTON_LEFT);
-              console.log('Called nes.buttonUp(1, jsnes.Controller.BUTTON_LEFT)');
-            }
-            keyStates.left = false;
-          }
-          break;
-        case 'ArrowRight':
-          if (keyStates.right) {
-            console.log('Right released');
-            if (typeof nes.buttonUp === 'function') {
-              nes.buttonUp(1, jsnes.Controller.BUTTON_RIGHT);
-              console.log('Called nes.buttonUp(1, jsnes.Controller.BUTTON_RIGHT)');
-            }
-            keyStates.right = false;
-          }
-          break;
-        case 'KeyZ':
-          if (keyStates.a) {
-            console.log('A released');
-            if (typeof nes.buttonUp === 'function') {
-              nes.buttonUp(1, jsnes.Controller.BUTTON_A);
-              console.log('Called nes.buttonUp(1, jsnes.Controller.BUTTON_A)');
-            }
-            keyStates.a = false;
-          }
-          break;
-        case 'KeyX':
-          if (keyStates.b) {
-            console.log('B released');
-            if (typeof nes.buttonUp === 'function') {
-              nes.buttonUp(1, jsnes.Controller.BUTTON_B);
-              console.log('Called nes.buttonUp(1, jsnes.Controller.BUTTON_B)');
-            }
-            keyStates.b = false;
-          }
-          break;
-        case 'Enter':
-          if (keyStates.start) {
-            console.log('Start released');
-            if (typeof nes.buttonUp === 'function') {
-              nes.buttonUp(1, jsnes.Controller.BUTTON_START);
-              console.log('Called nes.buttonUp(1, jsnes.Controller.BUTTON_START)');
-            }
-            keyStates.start = false;
-          }
-          break;
-        case 'ShiftLeft':
-        case 'ShiftRight':
-          if (keyStates.select) {
-            console.log('Select released');
-            if (typeof nes.buttonUp === 'function') {
-              nes.buttonUp(1, jsnes.Controller.BUTTON_SELECT);
-              console.log('Called nes.buttonUp(1, jsnes.Controller.BUTTON_SELECT)');
-            }
-            keyStates.select = false;
-          }
-          break;
-      }
-    });
+  // Simple keyboard handler like the working demo
+  function keyboard(callback, event) {
+    var player = 1;
+    switch(event.keyCode) {
+      case 38: // UP
+        callback(player, jsnes.Controller.BUTTON_UP); break;
+      case 40: // Down
+        callback(player, jsnes.Controller.BUTTON_DOWN); break;
+      case 37: // Left
+        callback(player, jsnes.Controller.BUTTON_LEFT); break;
+      case 39: // Right
+        callback(player, jsnes.Controller.BUTTON_RIGHT); break;
+      case 65: // 'a' - qwerty, dvorak
+      case 81: // 'q' - azerty
+        callback(player, jsnes.Controller.BUTTON_A); break;
+      case 83: // 's' - qwerty, azerty
+      case 79: // 'o' - dvorak
+      case 88: // 'x' - alternative B button
+        callback(player, jsnes.Controller.BUTTON_B); break;
+      case 9: // Tab
+        callback(player, jsnes.Controller.BUTTON_SELECT); break;
+      case 13: // Return
+        callback(player, jsnes.Controller.BUTTON_START); break;
+      default: break;
+    }
   }
 
   // Setup keyboard controls immediately
@@ -1433,10 +1194,24 @@ function getSpriteColor(ppu, palIdx, colorIdx) {
     
     // Test if keyboard events work at all
     document.addEventListener('keydown', function(e) {
-      console.log('TEST: Keydown detected:', e.code);
+      console.log('TEST: Keydown detected:', e.keyCode);
     });
     
-    setupKeyboardControls();
+    // Use the simple approach from the working demo
+    document.addEventListener('keydown', (event) => {
+      console.log('Keydown event, keyCode:', event.keyCode);
+      if (nes && typeof nes.buttonDown === 'function') {
+        keyboard(nes.buttonDown, event);
+      }
+    });
+    
+    document.addEventListener('keyup', (event) => {
+      console.log('Keyup event, keyCode:', event.keyCode);
+      if (nes && typeof nes.buttonUp === 'function') {
+        keyboard(nes.buttonUp, event);
+      }
+    });
+    
     console.log('Keyboard controls setup complete');
   } catch (error) {
     console.error('Error setting up keyboard controls:', error);
