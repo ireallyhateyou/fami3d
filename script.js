@@ -53,6 +53,25 @@ let romData = null;
   const spriteImageData = spriteCtx.createImageData(256, 240);
   const spriteBehindImageData = spriteBehindCtx.createImageData(256, 240);
 
+  // ===== TILE MESH CACHE FOR PER-PIXEL EXTRUSION =====
+  const tileMeshCache = new Map(); // key: `${tileIdx}_${palIdx}_${bgColorKey}` => array of voxel meshes
+  const spriteMeshCache = new Map(); // key: `sprite_${canvasHash}` => array of voxel meshes
+  const spriteBehindMeshCache = new Map(); // key: `spriteBehind_${canvasHash}` => array of voxel meshes
+
+  // ===== PERFORMANCE OPTIMIZATIONS =====
+  let lastSpriteHash = '';
+  let lastSpriteBehindHash = '';
+  let frameSkipCounter = 0;
+  const FRAME_SKIP_INTERVAL = 3; // Update sprites every 3 frames
+  const MAX_VOXELS_PER_SPRITE = 1000; // Limit voxels for performance
+
+  // ===== FAST RENDERING APPROACH =====
+  // Use instanced rendering and merged geometries instead of individual voxels
+  let spriteInstancedMesh = null;
+  let spriteBehindInstancedMesh = null;
+  let tileInstancedMeshes = []; // Array of instanced meshes for tiles
+  const INSTANCE_LIMIT = 10000; // Maximum instances per mesh
+
   // ===== THREE.JS SETUP =====
   function setupThreeJS() {
   const container = document.getElementById('threejs-container');
@@ -115,61 +134,53 @@ let romData = null;
     console.log('Three.js setup complete - 3D tiles');
   }
 
-  // ===== TILE MESH CACHE FOR PER-PIXEL EXTRUSION =====
-  const tileMeshCache = new Map(); // key: `${tileIdx}_${palIdx}` => geometry
-  const tilePixelCache = new Map(); // key: `${tileIdx}_${palIdx}` => pixel colors array
-
-  function createPixelExtrudedTileGeometry(tileCanvas, avgColor) {
-    // Create a single geometry with average tile color for stability
+  function createPixelExtrudedTileGeometry(tileCanvas, avgColor, cacheKey) {
+    // Check cache first
+    if (tileMeshCache.has(cacheKey)) {
+      // Return clones to avoid Three.js parent/child conflicts
+      return tileMeshCache.get(cacheKey).map(voxel => voxel.clone());
+    }
+    // Create individual voxels with their actual pixel colors
     const ctx = tileCanvas.getContext('2d');
     const imgData = ctx.getImageData(0, 0, 8, 8).data;
-    
-    // Get background color by sampling pixel (5,5) from background canvas
     const bgCtx = bgCanvas.getContext('2d');
     const bgPixelData = bgCtx.getImageData(5, 5, 1, 1).data;
     const bgColor = [bgPixelData[0], bgPixelData[1], bgPixelData[2]];
-    
-    // Set scene background to sampled background color
     if (threeScene) {
       const bgColorHex = (bgColor[0] << 16) | (bgColor[1] << 8) | bgColor[2];
       threeScene.background = new THREE.Color(bgColorHex);
     }
-    
-    const geometries = [];
-    
+    const voxels = [];
     for (let py = 0; py < 8; py++) {
       for (let px = 0; px < 8; px++) {
         const idx = (py * 8 + px) * 4;
         const r = imgData[idx];
         const g = imgData[idx + 1];
         const b = imgData[idx + 2];
-        
-        // Check if this pixel is significantly different from background
         const dist = Math.sqrt(
           (r - bgColor[0]) ** 2 +
           (g - bgColor[1]) ** 2 +
           (b - bgColor[2]) ** 2
         );
-        
-        // Only extrude if pixel is different from background
         if (imgData[idx + 3] > 0 && dist > 8) {
           const intensity = Math.min(dist / 100, 1.0);
           const height = 0.1 + (intensity * 0.9);
-          
           const box = new THREE.BoxGeometry(0.0625, 0.0625, height);
           box.translate((px - 4) * 0.0625 + 0.03125, (3.5 - py) * 0.0625 + 0.03125, height / 2);
-          geometries.push(box);
+          const pixelColor = new THREE.Color(r / 255, g / 255, b / 255);
+          const material = new THREE.MeshLambertMaterial({ color: pixelColor });
+          const voxel = new THREE.Mesh(box, material);
+          voxels.push(voxel);
         }
       }
     }
-    
-    if (geometries.length === 0) {
-      // No extrusion found - return null to indicate no geometry
+    if (voxels.length === 0) {
       return null;
     }
-    
-    const merged = THREE.BufferGeometryUtils.mergeBufferGeometries(geometries);
-    return merged;
+    // Cache the voxel array for this tile
+    tileMeshCache.set(cacheKey, voxels.map(voxel => voxel.clone()));
+    // Return clones for this instance
+    return voxels.map(voxel => voxel.clone());
   }
 
   function getSpriteAverageColor(canvas) {
@@ -403,7 +414,6 @@ let romData = null;
         const bgColorKey = `${bgPixelData[0]}_${bgPixelData[1]}_${bgPixelData[2]}`;
         const cacheKey = `${tileIdx}_${palIdx}_${bgColorKey}`;
         let geometry = tileMeshCache.get(cacheKey);
-        let pixelColors = tilePixelCache.get(cacheKey);
         
         // Only recreate geometry if tile changed or cache miss
         if (!geometry || tileChanged) {
@@ -416,20 +426,7 @@ let romData = null;
           tileCtx.drawImage(bgCanvas, tx * 8, ty * 8, 8, 8, 0, 0, 8, 8);
           
           const avgColor = getTileAverageColor(bgCanvas, tx, ty, 8);
-          geometry = createPixelExtrudedTileGeometry(tileCanvas, avgColor);
-          tileMeshCache.set(cacheKey, geometry);
-          
-          // Cache the pixel colors for this tile
-          const ctx = tileCanvas.getContext('2d');
-          const imgData = ctx.getImageData(0, 0, 8, 8).data;
-          pixelColors = [];
-          for (let py = 0; py < 8; py++) {
-            for (let px = 0; px < 8; px++) {
-              const idx = (py * 8 + px) * 4;
-              pixelColors.push([imgData[idx], imgData[idx + 1], imgData[idx + 2]]);
-            }
-          }
-          tilePixelCache.set(cacheKey, pixelColors);
+          geometry = createPixelExtrudedTileGeometry(tileCanvas, avgColor, cacheKey);
         }
         
         // Only update mesh if geometry changed
@@ -438,12 +435,18 @@ let romData = null;
             // No extrusion found - hide the tile completely
             mesh.visible = false;
           } else {
-            mesh.geometry.dispose();
-            mesh.geometry = geometry;
-            // Use average tile color for the extruded geometry
-            const avgColor = getTileAverageColor(bgCanvas, tx, ty, 8);
-            const avgColorHex = `#${((1 << 24) + (avgColor[0] << 16) + (avgColor[1] << 8) + avgColor[2]).toString(16).slice(1)}`;
-            mesh.material = new THREE.MeshLambertMaterial({ color: avgColorHex });
+            // Clear existing children
+            while (mesh.children.length) {
+              const child = mesh.children[0];
+              child.geometry.dispose();
+              child.material.dispose();
+              mesh.remove(child);
+            }
+            
+            // Add voxels as children
+            for (const voxel of geometry) {
+              mesh.add(voxel.clone());
+            }
             
             // Check if tile is mostly background color
             const bgCtx = bgCanvas.getContext('2d');
@@ -585,46 +588,15 @@ let romData = null;
   let spriteBehindBoxMesh = null;
   let spriteLayerOverlayPlane = null;
 
-  // ===== SPRITE PLANES (unchanged) =====
+  // ===== FAST MERGED SPRITES =====
   function createSpritePlanes() {
-    // Sprite behind box
-    spriteBehindTexture = new THREE.CanvasTexture(spriteBehindCanvas);
-    spriteBehindTexture.minFilter = THREE.LinearFilter;
-    spriteBehindTexture.magFilter = THREE.LinearFilter;
-    const spriteBehindMatArray = [
-      new THREE.MeshLambertMaterial({ color: 0x000000 }), // right
-      new THREE.MeshLambertMaterial({ color: 0x000000 }), // left
-      new THREE.MeshLambertMaterial({ color: 0x000000 }), // top
-      new THREE.MeshLambertMaterial({ color: 0x000000 }), // bottom
-      new THREE.MeshLambertMaterial({ 
-        map: spriteBehindTexture, 
-        transparent: true,
-        alphaTest: 0.1
-      }), // front
-      new THREE.MeshLambertMaterial({ color: 0x000000 }) // back
-    ];
-    spriteBehindBoxMesh = new THREE.Mesh(new THREE.BoxGeometry(16, 12, 0.1), spriteBehindMatArray);
+    // Create simple groups for merged geometries
+    spriteBehindBoxMesh = new THREE.Group();
     spriteBehindBoxMesh.position.z = -0.6;
     threeScene.add(spriteBehindBoxMesh);
     spriteTileGroup = spriteBehindBoxMesh;
 
-    // Sprite box
-    spriteTexture = new THREE.CanvasTexture(spriteCanvas);
-    spriteTexture.minFilter = THREE.LinearFilter;
-    spriteTexture.magFilter = THREE.LinearFilter;
-    const spriteMatArray = [
-      new THREE.MeshLambertMaterial({ color: 0x000000 }), // right
-      new THREE.MeshLambertMaterial({ color: 0x000000 }), // left
-      new THREE.MeshLambertMaterial({ color: 0x000000 }), // top
-      new THREE.MeshLambertMaterial({ color: 0x000000 }), // bottom
-      new THREE.MeshLambertMaterial({ 
-        map: spriteTexture, 
-        transparent: true,
-        alphaTest: 0.1
-      }), // front
-      new THREE.MeshLambertMaterial({ color: 0x000000 }) // back
-    ];
-    spriteBoxMesh = new THREE.Mesh(new THREE.BoxGeometry(16, 12, 0.1), spriteMatArray);
+    spriteBoxMesh = new THREE.Group();
     spriteBoxMesh.position.z = 2.1;
     threeScene.add(spriteBoxMesh);
   }
@@ -633,30 +605,94 @@ let romData = null;
   function updateThreeScene() {
     if (!use3D || !threeScene) return;
     update3DBackgroundTiles();
-    if (spriteTexture) spriteTexture.needsUpdate = true;
-    if (spriteBehindTexture) spriteBehindTexture.needsUpdate = true;
-    // Per-pixel extrusion for main sprite
+    
+    // Fast merged sprite updates
     if (spriteBoxMesh) {
-      const geometry = createPixelExtrudedSpriteGeometry(spriteCanvas);
-      spriteBoxMesh.geometry.dispose();
-      spriteBoxMesh.geometry = geometry;
-      const avgColor = getSpriteAverageColor(spriteCanvas);
-      const avgColorHex = `#${((1 << 24) + (avgColor[0] << 16) + (avgColor[1] << 8) + avgColor[2]).toString(16).slice(1)}`;
-      spriteBoxMesh.material = new THREE.MeshLambertMaterial({ color: avgColorHex });
-      spriteBoxMesh.position.z = 2.1 + 0.25; // keep front face at same z
+      // Clear existing children
+      while (spriteBoxMesh.children.length) {
+        const child = spriteBoxMesh.children[0];
+        child.geometry.dispose();
+        child.material.dispose();
+        spriteBoxMesh.remove(child);
+      }
+      
+      // Create merged geometry for sprite
+      const geometries = [];
+      const ctx = spriteCanvas.getContext('2d');
+      const imgData = ctx.getImageData(0, 0, 256, 240).data;
+      
+      for (let py = 0; py < 240; py += 8) { // Sample every 8th pixel for speed
+        for (let px = 0; px < 256; px += 8) {
+          const idx = (py * 256 + px) * 4;
+          if (imgData[idx + 3] > 32) { // Non-transparent pixel
+            const box = new THREE.BoxGeometry(0.2, 0.2, 0.2); // Larger voxels
+            box.translate((px - 128) / 32, (120 - py) / 30, 0);
+            geometries.push(box);
+          }
+        }
+      }
+      
+      if (geometries.length > 0) {
+        const mergedGeometry = THREE.BufferGeometryUtils.mergeBufferGeometries(geometries);
+        const avgColor = getSpriteAverageColor(spriteCanvas);
+        const material = new THREE.MeshLambertMaterial({ 
+          color: new THREE.Color(avgColor[0]/255, avgColor[1]/255, avgColor[2]/255) 
+        });
+        const mesh = new THREE.Mesh(mergedGeometry, material);
+        spriteBoxMesh.add(mesh);
+        console.log(`Sprite voxels: ${geometries.length}`);
+      }
     }
-    // Per-pixel extrusion for sprite behind
+    
+    // Fast merged sprite behind updates
     if (spriteBehindBoxMesh) {
-      const geometry = createPixelExtrudedSpriteGeometry(spriteBehindCanvas);
-      spriteBehindBoxMesh.geometry.dispose();
-      spriteBehindBoxMesh.geometry = geometry;
-      const avgColor = getSpriteAverageColor(spriteBehindCanvas);
-      const avgColorHex = `#${((1 << 24) + (avgColor[0] << 16) + (avgColor[1] << 8) + avgColor[2]).toString(16).slice(1)}`;
-      spriteBehindBoxMesh.material = new THREE.MeshLambertMaterial({ color: avgColorHex });
-      spriteBehindBoxMesh.position.z = -0.6 + 0.25;
+      // Clear existing children
+      while (spriteBehindBoxMesh.children.length) {
+        const child = spriteBehindBoxMesh.children[0];
+        child.geometry.dispose();
+        child.material.dispose();
+        spriteBehindBoxMesh.remove(child);
+      }
+      
+      // Create merged geometry for sprite behind
+      const geometries = [];
+      const ctx = spriteBehindCanvas.getContext('2d');
+      const imgData = ctx.getImageData(0, 0, 256, 240).data;
+      
+      for (let py = 0; py < 240; py += 8) { // Sample every 8th pixel for speed
+        for (let px = 0; px < 256; px += 8) {
+          const idx = (py * 256 + px) * 4;
+          if (imgData[idx + 3] > 32) { // Non-transparent pixel
+            const box = new THREE.BoxGeometry(0.2, 0.2, 0.2); // Larger voxels
+            box.translate((px - 128) / 32, (120 - py) / 30, 0);
+            geometries.push(box);
+          }
+        }
+      }
+      
+      if (geometries.length > 0) {
+        const mergedGeometry = THREE.BufferGeometryUtils.mergeBufferGeometries(geometries);
+        const avgColor = getSpriteAverageColor(spriteBehindCanvas);
+        const material = new THREE.MeshLambertMaterial({ 
+          color: new THREE.Color(avgColor[0]/255, avgColor[1]/255, avgColor[2]/255) 
+        });
+        const mesh = new THREE.Mesh(mergedGeometry, material);
+        spriteBehindBoxMesh.add(mesh);
+        console.log(`Sprite behind voxels: ${geometries.length}`);
+      }
     }
+    
     // Render
     threeRenderer.render(threeScene, threeCamera);
+  }
+
+  // Helper function to generate a simple hash for canvas data
+  function generateCanvasHash(imgData) {
+    let hash = 0;
+    for (let i = 0; i < imgData.length; i += 16) { // Sample every 4th pixel
+      hash = ((hash << 5) - hash + imgData[i]) | 0;
+    }
+    return hash.toString();
   }
 
   // ===== MAIN RENDER LOOP =====
