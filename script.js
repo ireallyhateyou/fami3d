@@ -12,6 +12,38 @@ window.addEventListener('DOMContentLoaded', () => {
     helpModal.classList.remove('show');
   });
 
+  // === Library menu popup logic ===
+  const menuBtn = document.getElementById('menuBtn');
+  const libraryModal = document.getElementById('libraryModal');
+  const closeLibraryModal = document.getElementById('closeLibraryModal');
+  menuBtn.addEventListener('click', () => {
+    libraryModal.classList.add('show');
+  });
+  closeLibraryModal.addEventListener('click', () => {
+    libraryModal.classList.remove('show');
+  });
+  // Clicking outside the modal closes it
+  libraryModal.addEventListener('click', (e) => {
+    if (e.target === libraryModal) libraryModal.classList.remove('show');
+  });
+  // ROM library buttons
+  document.querySelectorAll('.rom-library-btn').forEach(btn => {
+    btn.addEventListener('click', async function() {
+      const url = this.getAttribute('data-rom-url');
+      if (!url) return;
+      try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Failed to fetch ROM');
+        const arrayBuffer = await response.arrayBuffer();
+        romData = arrayBufferToBinaryString(arrayBuffer); // Always use binary string for jsnes
+        libraryModal.classList.remove('show');
+        startNesEmulator();
+      } catch (err) {
+        console.error('Failed to load ROM:', err);
+      }
+    });
+  });
+
 // --- Get canvas contexts ---
 const bgCanvas = document.getElementById('bgCanvas');
 const bgCtx = bgCanvas.getContext('2d');
@@ -1301,7 +1333,8 @@ function getSpriteColor(ppu, palIdx, colorIdx) {
   let tileRefreshTimer = null;
   // Background panel removed - no longer needed
 
-  document.getElementById('startBtn').onclick = function() {
+  // === NES START LOGIC REFACTOR ===
+  function startNesEmulator() {
     if (!romData) return;
     if (animationId) cancelAnimationFrame(animationId);
     // Re-initialize NES canvas and imageData for a clean start
@@ -1317,7 +1350,6 @@ function getSpriteColor(ppu, palIdx, colorIdx) {
     // ===== AUDIO: Create WebAudioPlayer if not already =====
     if (!nesAudioPlayer && window.jsnes && jsnes.WebAudioPlayer) {
       nesAudioPlayer = new jsnes.WebAudioPlayer();
-      console.log('Created nesAudioPlayer:', nesAudioPlayer);
       debugAudioState('After creation: ');
     }
     // Resume audio context on user gesture (required by browsers)
@@ -1393,54 +1425,30 @@ function getSpriteColor(ppu, palIdx, colorIdx) {
         }
         ctx.putImageData(imageData, 0, 0);
         nesFrameChanged = true;
-        // Clear tile mesh cache to force updates
         tileMeshCache.clear();
       },
       audio: nesAudioPlayer,
       onAudioSample: (!nesAudioPlayer ? function(left, right) {
-        // jsnes expects samples in [-1, 1] float
         fallbackOnAudioSample(left, right);
-        // Debug log
         if (Math.random() < 0.001) console.log('onAudioSample called:', left, right);
       } : null)
     });
-    console.log('NES instantiated with audio:', nesAudioPlayer);
-    debugAudioState('After NES instantiation: ');
-    nes.loadROM(romData);
     window.nes = nes;
-    
-    // Debug: Check if NES object has button methods
-    console.log('NES object created:', nes);
-    console.log('NES buttonDown method:', typeof nes.buttonDown);
-    console.log('NES buttonUp method:', typeof nes.buttonUp);
-    console.log('All NES methods:', Object.getOwnPropertyNames(nes));
-    console.log('NES controller methods:', Object.getOwnPropertyNames(nes.controller1 || {}));
-    
-    // Debug: Check controllers structure
-    console.log('nes.controllers:', nes.controllers);
-    console.log('nes.controllers keys:', Object.keys(nes.controllers || {}));
-    console.log('nes.controllers[1]:', nes.controllers && nes.controllers[1]);
-    console.log('nes.controllers[1].state:', nes.controllers && nes.controllers[1] && nes.controllers[1].state);
-    
-    // Debug: Check jsnes.Controller constants
-    console.log('jsnes.Controller:', jsnes.Controller);
-    console.log('jsnes.Controller.BUTTON_UP:', jsnes.Controller.BUTTON_UP);
-    console.log('jsnes.Controller.BUTTON_DOWN:', jsnes.Controller.BUTTON_DOWN);
-    console.log('jsnes.Controller.BUTTON_LEFT:', jsnes.Controller.BUTTON_LEFT);
-    console.log('jsnes.Controller.BUTTON_RIGHT:', jsnes.Controller.BUTTON_RIGHT);
-    console.log('jsnes.Controller.BUTTON_A:', jsnes.Controller.BUTTON_A);
-    console.log('jsnes.Controller.BUTTON_B:', jsnes.Controller.BUTTON_B);
-    console.log('jsnes.Controller.BUTTON_START:', jsnes.Controller.BUTTON_START);
-    console.log('jsnes.Controller.BUTTON_SELECT:', jsnes.Controller.BUTTON_SELECT);
-    
-    // Debug: Check all properties of jsnes.Controller
-    console.log('All jsnes.Controller properties:', Object.getOwnPropertyNames(jsnes.Controller));
-    
-    // Debug: Try to find button constants
-    for (let prop in jsnes.Controller) {
-      console.log(`jsnes.Controller.${prop}:`, jsnes.Controller[prop]);
+    // Try Uint8Array first (if supported), else fallback to binary string
+    try {
+      if (romData instanceof Uint8Array) {
+        nes.loadROM(romData);
+      } else if (typeof romData === 'string') {
+        nes.loadROM(romData);
+      } else {
+        // Try to convert to Uint8Array if possible
+        nes.loadROM(new Uint8Array(romData));
+      }
+    } catch (e) {
+      console.error('Failed to load ROM into jsnes:', e);
     }
-    
+
+    // Frame loop
     let lastTime = 0;
     function frameLoop(now) {
       if (!isPaused) {
@@ -1452,35 +1460,30 @@ function getSpriteColor(ppu, palIdx, colorIdx) {
       animationId = requestAnimationFrame(frameLoop);
     }
     requestAnimationFrame(frameLoop);
-    // Start main render loop
     renderFrame(0);
-
-    // ===== TILE REFRESH TIMER: Force full tile cache refresh after 2s =====
+    // Tile refresh timer as before...
     if (tileRefreshTimer) clearTimeout(tileRefreshTimer);
     tileRefreshTimer = setTimeout(() => {
-      // Clear tile mesh cache
       tileMeshCache.clear();
-      // Also clear tile material cache to force color re-fetch
       tileMaterialCache.clear();
-      // Force all tiles to update
       if (typeof lastTileIdx !== 'undefined') {
         for (let ty = 0; ty < lastTileIdx.length; ty++) {
           if (lastTileIdx[ty]) {
             for (let tx = 0; tx < lastTileIdx[ty].length; tx++) {
               lastTileIdx[ty][tx] = null;
               lastTilePal[ty][tx] = null;
-              // Force overlay texture update
               if (bgTileOverlayPlanes[ty] && bgTileOverlayPlanes[ty][tx] && bgTileOverlayPlanes[ty][tx].texture) {
                 bgTileOverlayPlanes[ty][tx].texture.needsUpdate = true;
               }
-              // Reset dirty hashes
               if (tileDirtyHashes[ty]) tileDirtyHashes[ty][tx] = null;
             }
           }
         }
       }
     }, 2000);
-  };
+  }
+
+  document.getElementById('startBtn').onclick = startNesEmulator;
 
   // ===== TOGGLE BUTTON BEHAVIOR =====
   // Removed toggle 3D button behavior
@@ -1509,5 +1512,15 @@ function getSpriteColor(ppu, palIdx, colorIdx) {
     [252,252,252],[164,228,252],[184,184,248],[216,184,248],[248,184,248],[248,164,192],[240,208,176],[252,224,168],
     [248,216,120],[216,248,120],[184,248,184],[184,248,216],[0,252,252],[248,216,248],[0,0,0],[0,0,0]
   ];
+
+  // Helper: Convert ArrayBuffer to binary string (for jsnes)
+  function arrayBufferToBinaryString(buffer) {
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return binary;
+  }
 
 });

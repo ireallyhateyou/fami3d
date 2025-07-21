@@ -184,6 +184,50 @@
     #helpModal p {
       color: #ccc;
     }
+    #libraryModal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0,0,0,0.6);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+      /* flex centering, but display: flex will be set by .show class */
+    }
+    #libraryModal.show {
+      display: flex;
+    }
+    #libraryModal button {
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.2s ease;
+    }
+    #libraryModal button:hover {
+      background: rgba(255,255,255,0.2);
+      border-color: rgba(255,255,255,0.3);
+    }
+    #libraryModal button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    #libraryModal h3 {
+      color: #fff;
+      margin: 0;
+    }
+    #libraryModal ul {
+      color: #ccc;
+    }
+    #libraryModal p {
+      color: #ccc;
+    }
   </style>
 </head>
 <body>
@@ -204,7 +248,7 @@
       <div style="margin-top:8px; font-size:1.1em; line-height:1.5;">
         <h3 style="margin-top:0; margin-bottom:16px;">fami3D</h3>
         <p style="font-size:0.95em; color:#ffb; margin-bottom:16px;">
-          <b>DISCLAIMER:</b> This is not for all types of PCs, you are creating about 185,000 voxels, so expect latency.
+          <b>DISCLAIMER:</b> This is not for all types of PCs, you are creating about 185,000 voxels, so expect it to be laggy.
         </p>
         <p style="font-size:0.95em; color:#fff; margin-bottom:16px;">
           Feel free to try out a couple FOSS ROMs in the library menu (☰), have fun!
@@ -225,6 +269,16 @@
             If you DON'T want to get your hands on a ROM, NEVER either Google it, if you need help DO NOT go on the <a href="https://hackclub.slack.com/archives/CMG6P6RE1" target="_blank" style="color:#4af;"><b>#piracy</b></a> channel in the Hack Club Slack!
           </p>
         </div>
+      </div>
+    </div>
+  </div>
+  <div id="libraryModal">
+    <div style="background:#222; color:#fff; padding:24px 32px; border-radius:8px; max-width:400px; max-height:80vh; margin:auto; position:relative; box-shadow:0 4px 32px #000; overflow-y:auto;">
+      <button id="closeLibraryModal" style="position:absolute; top:8px; right:12px; background:none; border:none; color:#fff; font-size:1.5em; cursor:pointer;">&times;</button>
+      <div style="margin-top:8px; font-size:1.1em; line-height:1.5;">
+        <h3 style="margin-top:0; margin-bottom:16px;">ROM Library</h3>
+        <button class="rom-library-btn" data-rom-url="https://cdn.jsdelivr.net/gh/bfirsh/jsnes-roms@master/nomolos.nes" style="width:100%;margin-bottom:10px;">Nomolos: Storming the Castle</button>
+        <button class="rom-library-btn" data-rom-url="https://cdn.jsdelivr.net/gh/bfirsh/jsnes-roms@master/lj65/lj65.nes" style="width:100%;">lj65</button>
       </div>
     </div>
   </div>
