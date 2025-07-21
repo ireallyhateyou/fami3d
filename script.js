@@ -1167,24 +1167,67 @@ function getSpriteColor(ppu, palIdx, colorIdx) {
   let nesAudioPlayer = null;
   let isMuted = false;
 
+  // Fallback audio using onAudioSample if WebAudioPlayer is not available
+  let audioCtx = null;
+  let audioBufferL = [];
+  let audioBufferR = [];
+  const BUFFER_SIZE = 4096;
+  function fallbackOnAudioSample(left, right) {
+    audioBufferL.push(left);
+    audioBufferR.push(right);
+    if (audioBufferL.length >= BUFFER_SIZE) {
+      playFallbackAudioBuffer();
+      audioBufferL = [];
+      audioBufferR = [];
+    }
+  }
+  function playFallbackAudioBuffer() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      console.log('Created fallback AudioContext');
+    }
+    if (isMuted) return;
+    const buffer = audioCtx.createBuffer(2, BUFFER_SIZE, audioCtx.sampleRate);
+    // Convert samples to Float32 in [-1, 1]
+    for (let i = 0; i < BUFFER_SIZE; i++) {
+      buffer.getChannelData(0)[i] = audioBufferL[i] || 0;
+      buffer.getChannelData(1)[i] = audioBufferR[i] || 0;
+    }
+    const source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(audioCtx.destination);
+    source.start();
+    console.log('Played fallback audio buffer');
+  }
+
+  // Debug: Log audio player creation and context state
+  function debugAudioState(prefix = '') {
+    if (nesAudioPlayer && nesAudioPlayer.ctx) {
+      console.log(prefix + 'nesAudioPlayer.ctx.state:', nesAudioPlayer.ctx.state);
+    } else {
+      console.warn(prefix + 'nesAudioPlayer or its context is missing');
+    }
+  }
+
   // ===== MUTE BUTTON FUNCTIONALITY =====
   document.getElementById('muteBtn').addEventListener('click', function() {
     isMuted = !isMuted;
     const muteBtn = document.getElementById('muteBtn');
-    
+    console.log('Mute toggled. isMuted:', isMuted);
     if (isMuted) {
       muteBtn.textContent = '🔇';
       muteBtn.title = 'Unmute';
       // Mute the audio context
       if (nesAudioPlayer && nesAudioPlayer.ctx) {
         nesAudioPlayer.ctx.suspend();
+        debugAudioState('After mute: ');
       }
     } else {
       muteBtn.textContent = '🔊';
       muteBtn.title = 'Mute';
       // Unmute the audio context
       if (nesAudioPlayer && nesAudioPlayer.ctx) {
-        nesAudioPlayer.ctx.resume();
+        nesAudioPlayer.ctx.resume().then(() => debugAudioState('After unmute: '));
       }
     }
   });
@@ -1204,11 +1247,11 @@ function getSpriteColor(ppu, palIdx, colorIdx) {
         callback(player, jsnes.Controller.BUTTON_LEFT); break;
       case 39: // Right
         callback(player, jsnes.Controller.BUTTON_RIGHT); break;
-      case 65: // 'a' - qwerty, dvorak
-      case 81: // 'q' - azerty
+      case 65: // 'a' - qwerty, dvorak (mirror Z)
+      case 90: // 'z' - qwerty (A button)
+      case 32: // Spacebar (mirror Z/A)
         callback(player, jsnes.Controller.BUTTON_A); break;
-      case 83: // 's' - qwerty, azerty
-      case 79: // 'o' - dvorak
+      case 83: // 's' - qwerty, azerty (mirror X)
       case 88: // 'x' - alternative B button
         callback(player, jsnes.Controller.BUTTON_B); break;
       case 9: // Tab
@@ -1227,20 +1270,22 @@ function getSpriteColor(ppu, palIdx, colorIdx) {
     
     // Test if keyboard events work at all
     document.addEventListener('keydown', function(e) {
-      console.log('TEST: Keydown detected:', e.keyCode);
+      console.log('TEST: Keydown detected:', e.keyCode, e);
     });
     
     // Use the simple approach from the working demo
     document.addEventListener('keydown', (event) => {
-      console.log('Keydown event, keyCode:', event.keyCode);
+      console.log('Keydown event, keyCode:', event.keyCode, event);
       if (nes && typeof nes.buttonDown === 'function') {
+        console.log('Calling nes.buttonDown for keyCode:', event.keyCode);
         keyboard(nes.buttonDown, event);
       }
     });
     
     document.addEventListener('keyup', (event) => {
-      console.log('Keyup event, keyCode:', event.keyCode);
+      console.log('Keyup event, keyCode:', event.keyCode, event);
       if (nes && typeof nes.buttonUp === 'function') {
+        console.log('Calling nes.buttonUp for keyCode:', event.keyCode);
         keyboard(nes.buttonUp, event);
       }
     });
@@ -1272,10 +1317,17 @@ function getSpriteColor(ppu, palIdx, colorIdx) {
     // ===== AUDIO: Create WebAudioPlayer if not already =====
     if (!nesAudioPlayer && window.jsnes && jsnes.WebAudioPlayer) {
       nesAudioPlayer = new jsnes.WebAudioPlayer();
+      console.log('Created nesAudioPlayer:', nesAudioPlayer);
+      debugAudioState('After creation: ');
     }
     // Resume audio context on user gesture (required by browsers)
-    if (nesAudioPlayer && nesAudioPlayer.ctx && nesAudioPlayer.ctx.state === 'suspended') {
-      nesAudioPlayer.ctx.resume();
+    if (nesAudioPlayer && nesAudioPlayer.ctx && nesAudioPlayer.ctx.state !== 'running') {
+      nesAudioPlayer.ctx.resume().then(() => {
+        debugAudioState('After resume attempt: ');
+        if (nesAudioPlayer.ctx.state !== 'running') {
+          console.warn('Audio context is NOT running after resume!');
+        }
+      });
     }
 
     // Reset tile caches and mesh visibility
@@ -1327,6 +1379,7 @@ function getSpriteColor(ppu, palIdx, colorIdx) {
       }
     }
 
+    // ===== NES INSTANTIATION =====
     nes = new jsnes.NES({
       palette: fbxPalette,
       onFrame: function(buffer) {
@@ -1343,8 +1396,16 @@ function getSpriteColor(ppu, palIdx, colorIdx) {
         // Clear tile mesh cache to force updates
         tileMeshCache.clear();
       },
-      audio: nesAudioPlayer
+      audio: nesAudioPlayer,
+      onAudioSample: (!nesAudioPlayer ? function(left, right) {
+        // jsnes expects samples in [-1, 1] float
+        fallbackOnAudioSample(left, right);
+        // Debug log
+        if (Math.random() < 0.001) console.log('onAudioSample called:', left, right);
+      } : null)
     });
+    console.log('NES instantiated with audio:', nesAudioPlayer);
+    debugAudioState('After NES instantiation: ');
     nes.loadROM(romData);
     window.nes = nes;
     
