@@ -96,7 +96,8 @@ let romData = null;
 
     // Camera setup
     threeCamera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-    threeCamera.position.set(0, 8, 16);
+    // Place camera level with the NES screen, not above
+    threeCamera.position.set(0, 0, 16); // y=0 (level), z=16 (distance)
     threeCamera.lookAt(0, 0, 0);
 
     // Controls setup
@@ -123,11 +124,10 @@ let romData = null;
     threeScene.add(directionalLight);
 
     // Grid and axes
-    const gridHelper = new THREE.GridHelper(30, 30, 0x444444);
-    threeScene.add(gridHelper);
 
-    const axesHelper = new THREE.AxesHelper(5);
-    threeScene.add(axesHelper);
+    // REMOVE axesHelper (wireframe showing x, y, z axes)
+    // const axesHelper = new THREE.AxesHelper(5);
+    // threeScene.add(axesHelper);
 
     // Create 3D background tiles (no flat plane)
     create3DBackgroundTiles();
@@ -164,8 +164,11 @@ let romData = null;
           (b - bgColor[2]) ** 2
         );
         if (imgData[idx + 3] > 0 && dist > 8) {
-          const box = new THREE.BoxGeometry(0.0625, 0.0625, 1.0);
-          box.translate((px - 4) * 0.0625 + 0.03125, (3.5 - py) * 0.0625 + 0.03125, 0.5);
+          // Move voxel geometry a tiny bit farther back to avoid Z-fighting with overlay
+          const voxelDepth = 0.35;
+          // Offset by an extra 0.03 units farther back
+          const box = new THREE.BoxGeometry(0.0625, 0.0625, voxelDepth);
+          box.translate((px - 4) * 0.0625 + 0.03125, (3.5 - py) * 0.0625 + 0.03125, 1.01 - voxelDepth/2 - 0.03);
           geometries.push(box);
           hasVoxel = true;
         }
@@ -691,6 +694,19 @@ let romData = null;
     threeRenderer.render(threeScene, threeCamera);
   }
 
+  // ===== TILE DIRTY HASHES FOR OPTIMIZATION =====
+  let tileDirtyHashes = [];
+  function getTileHash(tileCanvas) {
+    // Simple hash: sum of all pixel values
+    const ctx = tileCanvas.getContext('2d');
+    const imgData = ctx.getImageData(0, 0, 8, 8).data;
+    let hash = 0;
+    for (let i = 0; i < imgData.length; i += 8) {
+      hash = ((hash << 5) - hash + imgData[i]) | 0;
+    }
+    return hash;
+  }
+
   function update3DBackgroundTiles() {
     if (!bgTileMeshes.length) return;
     let nesBgColor = [0, 0, 0];
@@ -724,83 +740,100 @@ let romData = null;
         } else {
           tileChanged = true;
         }
-        // Update tile canvas if changed
-        if (tileChanged) {
-          const tileCanvas = bgTileCanvases[ty][tx];
-          const tileCtx = tileCanvas.getContext('2d');
-          tileCtx.clearRect(0, 0, 8, 8);
-          tileCtx.drawImage(bgCanvas, tx * 8, ty * 8, 8, 8, 0, 0, 8, 8);
-          // Filter out background color for overlay transparency using both NES RAM and (4,4) sampled color
-          const imgData = tileCtx.getImageData(0, 0, 8, 8);
-          for (let i = 0; i < imgData.data.length; i += 4) {
-            const r = imgData.data[i];
-            const g = imgData.data[i + 1];
-            const b = imgData.data[i + 2];
-            const distNes = Math.sqrt(
-              (r - nesBgColor[0]) ** 2 +
-              (g - nesBgColor[1]) ** 2 +
-              (b - nesBgColor[2]) ** 2
-            );
-            const distSampled = Math.sqrt(
-              (r - sampledBgColor[0]) ** 2 +
-              (g - sampledBgColor[1]) ** 2 +
-              (b - sampledBgColor[2]) ** 2
-            );
-            if (distNes < 8 || distSampled < 8) {
-              imgData.data[i + 3] = 0;
-            }
+        // Always clear the tile canvas before drawing
+        const tileCanvas = bgTileCanvases[ty][tx];
+        const tileCtx = tileCanvas.getContext('2d');
+        tileCtx.clearRect(0, 0, 8, 8);
+        tileCtx.drawImage(bgCanvas, tx * 8, ty * 8, 8, 8, 0, 0, 8, 8);
+        // Filter out background color for overlay transparency using both NES RAM and (4,4) sampled color
+        const imgData = tileCtx.getImageData(0, 0, 8, 8);
+        let hasVisiblePixel = false;
+        for (let i = 0; i < imgData.data.length; i += 4) {
+          const r = imgData.data[i];
+          const g = imgData.data[i + 1];
+          const b = imgData.data[i + 2];
+          const distNes = Math.sqrt(
+            (r - nesBgColor[0]) ** 2 +
+            (g - nesBgColor[1]) ** 2 +
+            (b - nesBgColor[2]) ** 2
+          );
+          const distSampled = Math.sqrt(
+            (r - sampledBgColor[0]) ** 2 +
+            (g - sampledBgColor[1]) ** 2 +
+            (b - sampledBgColor[2]) ** 2
+          );
+          if (distNes < 8 || distSampled < 8) {
+            imgData.data[i + 3] = 0;
+          } else {
+            hasVisiblePixel = true;
           }
+        }
+        // If no visible pixel, clear the canvas to transparent
+        if (!hasVisiblePixel) {
+          tileCtx.clearRect(0, 0, 8, 8);
+        } else {
           tileCtx.putImageData(imgData, 0, 0);
         }
-        // Compute per-pixel silhouette extrusion for this tile
-        const mesh = bgTileMeshes[ty][tx];
-        // Use cache key based on tileIdx, palIdx, and background color
-        const bgCtx = bgCanvas.getContext('2d');
-        const bgPixelData = bgCtx.getImageData(5, 5, 1, 1).data;
-        const bgColorKey = `${bgPixelData[0]}_${bgPixelData[1]}_${bgPixelData[2]}`;
-        const cacheKey = `${tileIdx}_${palIdx}_${bgColorKey}`;
-        let geometry = tileMeshCache.get(cacheKey);
-        if (!geometry || tileChanged) {
-          const tileCanvas = bgTileCanvases[ty][tx];
-          // Use background-filtered average color
-          const avgColor = getTileAverageColor(bgCanvas, tx, ty, 8, nesBgColor, sampledBgColor);
-          geometry = createPixelExtrudedTileGeometry(tileCanvas, avgColor, cacheKey);
-          tileMeshCache.set(cacheKey, geometry);
-        }
-        if (geometry) {
-          mesh.visible = true;
-          if (mesh.geometry !== geometry) {
-            mesh.geometry && mesh.geometry.dispose();
-            mesh.geometry = geometry;
-            // Assign a single material with the average color for merged geometry, using material cache
+        // Dirty check: only update overlay/mesh if tile hash changed
+        if (!tileDirtyHashes[ty]) tileDirtyHashes[ty] = [];
+        const newHash = getTileHash(tileCanvas);
+        if (tileDirtyHashes[ty][tx] !== newHash || tileChanged) {
+          tileDirtyHashes[ty][tx] = newHash;
+          // Compute per-pixel silhouette extrusion for this tile
+          const mesh = bgTileMeshes[ty][tx];
+          // Use cache key based on tileIdx, palIdx, and background color
+          const bgCtx = bgCanvas.getContext('2d');
+          const bgPixelData = bgCtx.getImageData(5, 5, 1, 1).data;
+          const bgColorKey = `${bgPixelData[0]}_${bgPixelData[1]}_${bgPixelData[2]}`;
+          const cacheKey = `${tileIdx}_${palIdx}_${bgColorKey}`;
+          let geometry = tileMeshCache.get(cacheKey);
+          if (!geometry || tileChanged) {
+            // Use background-filtered average color
             const avgColor = getTileAverageColor(bgCanvas, tx, ty, 8, nesBgColor, sampledBgColor);
-            const avgColorHex = (avgColor[0] << 16) | (avgColor[1] << 8) | avgColor[2];
-            let mat = tileMaterialCache.get(avgColorHex);
-            if (!mat) {
-              mat = new THREE.MeshLambertMaterial({ color: avgColorHex });
-              tileMaterialCache.set(avgColorHex, mat);
+            geometry = createPixelExtrudedTileGeometry(tileCanvas, avgColor, cacheKey);
+            tileMeshCache.set(cacheKey, geometry);
+          }
+          if (geometry) {
+            mesh.visible = true;
+            if (mesh.geometry !== geometry) {
+              if (mesh.geometry) mesh.geometry.dispose();
+              mesh.geometry = geometry;
+              // Assign a single material with the average color for merged geometry, using material cache
+              const avgColor = getTileAverageColor(bgCanvas, tx, ty, 8, nesBgColor, sampledBgColor);
+              const avgColorHex = (avgColor[0] << 16) | (avgColor[1] << 8) | avgColor[2];
+              let mat = tileMaterialCache.get(avgColorHex);
+              if (!mat) {
+                mat = new THREE.MeshLambertMaterial({ color: avgColorHex });
+                tileMaterialCache.set(avgColorHex, mat);
+              }
+              if (mesh.material && mesh.material !== mat) mesh.material.dispose();
+              mesh.material = mat;
             }
-            mesh.material = mat;
-          }
-          // Per-tile overlay plane (create if missing)
-          if (!bgTileOverlayPlanes[ty][tx]) {
-            const overlayTexture = new THREE.CanvasTexture(bgTileCanvases[ty][tx]);
-            overlayTexture.minFilter = THREE.NearestFilter;
-            overlayTexture.magFilter = THREE.NearestFilter;
-            const overlayMat = new THREE.MeshBasicMaterial({ map: overlayTexture, transparent: true });
-            const overlayPlane = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.5), overlayMat);
-            overlayPlane.position.z = 1.01;
-            mesh.add(overlayPlane);
-            bgTileOverlayPlanes[ty][tx] = { plane: overlayPlane, texture: overlayTexture };
+            // Per-tile overlay plane (reuse texture if possible)
+            if (!bgTileOverlayPlanes[ty][tx]) {
+              const overlayTexture = new THREE.CanvasTexture(bgTileCanvases[ty][tx]);
+              overlayTexture.minFilter = THREE.NearestFilter;
+              overlayTexture.magFilter = THREE.NearestFilter;
+              const overlayMat = new THREE.MeshBasicMaterial({ map: overlayTexture, transparent: true });
+              const overlayPlane = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.5), overlayMat);
+              overlayPlane.position.z = 1.01;
+              mesh.add(overlayPlane);
+              bgTileOverlayPlanes[ty][tx] = { plane: overlayPlane, texture: overlayTexture };
+            }
+            // Always update overlay texture
+            if (bgTileOverlayPlanes[ty][tx]) {
+              bgTileOverlayPlanes[ty][tx].texture.needsUpdate = true;
+            }
           } else {
-            bgTileOverlayPlanes[ty][tx].texture.needsUpdate = true;
-          }
-        } else {
-          mesh.visible = false;
-          // Remove overlay plane if present
-          if (bgTileOverlayPlanes[ty][tx]) {
-            mesh.remove(bgTileOverlayPlanes[ty][tx].plane);
-            bgTileOverlayPlanes[ty][tx] = null;
+            mesh.visible = false;
+            // Remove overlay plane if present
+            if (bgTileOverlayPlanes[ty][tx]) {
+              mesh.remove(bgTileOverlayPlanes[ty][tx].plane);
+              if (bgTileOverlayPlanes[ty][tx].texture) bgTileOverlayPlanes[ty][tx].texture.dispose();
+              bgTileOverlayPlanes[ty][tx] = null;
+            }
+            // Ensure overlay is not left as gray: clear tile canvas to transparent
+            tileCtx.clearRect(0, 0, 8, 8);
           }
         }
       }
@@ -1366,6 +1399,8 @@ function getSpriteColor(ppu, palIdx, colorIdx) {
     tileRefreshTimer = setTimeout(() => {
       // Clear tile mesh cache
       tileMeshCache.clear();
+      // Also clear tile material cache to force color re-fetch
+      tileMaterialCache.clear();
       // Force all tiles to update
       if (typeof lastTileIdx !== 'undefined') {
         for (let ty = 0; ty < lastTileIdx.length; ty++) {
@@ -1373,6 +1408,12 @@ function getSpriteColor(ppu, palIdx, colorIdx) {
             for (let tx = 0; tx < lastTileIdx[ty].length; tx++) {
               lastTileIdx[ty][tx] = null;
               lastTilePal[ty][tx] = null;
+              // Force overlay texture update
+              if (bgTileOverlayPlanes[ty] && bgTileOverlayPlanes[ty][tx] && bgTileOverlayPlanes[ty][tx].texture) {
+                bgTileOverlayPlanes[ty][tx].texture.needsUpdate = true;
+              }
+              // Reset dirty hashes
+              if (tileDirtyHashes[ty]) tileDirtyHashes[ty][tx] = null;
             }
           }
         }
