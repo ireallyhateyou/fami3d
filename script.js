@@ -11,7 +11,6 @@ window.addEventListener('DOMContentLoaded', () => {
   });
   
   closeHelpModal.addEventListener('click', (e) => {
-    console.log('Close button clicked');
     e.preventDefault();
     e.stopPropagation();
     helpModal.classList.remove('show');
@@ -32,9 +31,7 @@ window.addEventListener('DOMContentLoaded', () => {
   });
 
   // Setup VR after DOM elements are available
-  console.log('Setting up VR...');
   setupVR();
-  console.log('VR setup complete');
   
   // Disable VR button until game is loaded
   const vrButtonElement = document.getElementById('vrBtn');
@@ -131,6 +128,15 @@ window.addEventListener('DOMContentLoaded', () => {
   let splitScreenLeftCamera = null;
   let splitScreenRightCamera = null;
   let splitScreenContainer = null;
+  let splitScreenLeftRenderer = null;
+  let splitScreenRightRenderer = null;
+  
+  // ===== ANAGLYPH 3D VARIABLES =====
+  let isAnaglyphMode = false;
+  let anaglyphContainer = null;
+  let anaglyphRenderer = null;
+  let anaglyphLeftCamera = null;
+  let anaglyphRightCamera = null;
 
   // ===== PERFORMANCE OPTIMIZATIONS =====
   const colorCache = new Map();
@@ -312,10 +318,17 @@ window.addEventListener('DOMContentLoaded', () => {
     if (isInVR) {
       exitVR();
     } else {
+      // Cycle through VR modes: WebXR -> Split-Screen -> Anaglyph
       if (navigator.xr && navigator.xr.isSessionSupported) {
-        enterVR();
+        enterVR(); // Try WebXR first
+      } else if (!isSplitScreenMode && !isAnaglyphMode) {
+        enterSplitScreenMode(); // Try split-screen second
+      } else if (isSplitScreenMode) {
+        exitSplitScreenMode();
+        enterAnaglyphMode(); // Try anaglyph third
       } else {
-        enterSplitScreenMode();
+        exitAnaglyphMode();
+        enterSplitScreenMode(); // Back to split-screen
       }
     }
   }
@@ -381,6 +394,132 @@ window.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // ===== ANAGLYPH 3D MODE FUNCTIONS =====
+  function enterAnaglyphMode() {
+    if (isAnaglyphMode) return;
+    
+    console.log('Entering Anaglyph 3D mode');
+    isAnaglyphMode = true;
+    isInVR = true;
+    
+    // Get the VR button element safely
+    const vrButtonElement = document.getElementById('vrBtn');
+    if (vrButtonElement) {
+      vrButtonElement.classList.add('active');
+      vrButtonElement.textContent = 'Exit VR';
+      vrButtonElement.style.background = 'linear-gradient(45deg, #4CAF50, #45a049)';
+    }
+    
+    // Create anaglyph container
+    anaglyphContainer = document.createElement('div');
+    anaglyphContainer.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: #000;
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    `;
+    
+    // Create anaglyph canvas
+    const anaglyphCanvas = document.createElement('canvas');
+    anaglyphCanvas.width = 256;
+    anaglyphCanvas.height = 240;
+    anaglyphCanvas.style.cssText = `
+      max-width: 90vw;
+      max-height: 90vh;
+      width: auto;
+      height: auto;
+      image-rendering: pixelated;
+    `;
+    
+    // Create anaglyph renderer
+    anaglyphRenderer = new THREE.WebGLRenderer({ 
+      antialias: true,
+      powerPreference: "high-performance"
+    });
+    anaglyphRenderer.setSize(256, 240);
+    anaglyphRenderer.setClearColor(0x0a0a0a);
+    
+    anaglyphContainer.appendChild(anaglyphCanvas);
+    document.body.appendChild(anaglyphContainer);
+    
+    // Create cameras for anaglyph 3D
+    anaglyphLeftCamera = threeCamera.clone();
+    anaglyphRightCamera = threeCamera.clone();
+    
+    // Enhanced IPD for anaglyph effect
+    const ipd = 0.15; // Stronger separation for anaglyph
+    anaglyphLeftCamera.position.x -= ipd / 2;
+    anaglyphRightCamera.position.x += ipd / 2;
+    
+    // Update projection matrices
+    anaglyphLeftCamera.updateProjectionMatrix();
+    anaglyphRightCamera.updateProjectionMatrix();
+    
+    // Add click to exit
+    anaglyphContainer.addEventListener('click', () => {
+      exitAnaglyphMode();
+    });
+    
+    // Start anaglyph render loop
+    function renderAnaglyph() {
+      if (!isAnaglyphMode) return;
+      
+      // Update scene if needed
+      if (nesFrameChanged) {
+        updateThreeScene();
+        nesFrameChanged = false;
+      }
+      
+      // Render left eye (red channel)
+      anaglyphRenderer.setClearColor(0x000000);
+      anaglyphRenderer.clear();
+      
+      // Set color mask for red channel only
+      anaglyphRenderer.state.buffers.color.setMask(true, false, false, true);
+      anaglyphRenderer.render(threeScene, anaglyphLeftCamera);
+      
+      // Set color mask for cyan channel (green + blue)
+      anaglyphRenderer.state.buffers.color.setMask(false, true, true, true);
+      anaglyphRenderer.render(threeScene, anaglyphRightCamera);
+      
+      // Reset color mask
+      anaglyphRenderer.state.buffers.color.setMask(true, true, true, true);
+      
+      requestAnimationFrame(renderAnaglyph);
+    }
+    
+    renderAnaglyph();
+    console.log('Anaglyph 3D mode active - wear red/cyan glasses!');
+  }
+  
+  function exitAnaglyphMode() {
+    if (!isAnaglyphMode) return;
+    
+    console.log('Exiting Anaglyph 3D mode');
+    isAnaglyphMode = false;
+    isInVR = false;
+    
+    // Get the VR button element safely
+    const vrButtonElement = document.getElementById('vrBtn');
+    if (vrButtonElement) {
+      vrButtonElement.classList.remove('active');
+      vrButtonElement.textContent = 'VR';
+      vrButtonElement.style.background = '';
+    }
+    
+    // Remove anaglyph container
+    if (anaglyphContainer) {
+      document.body.removeChild(anaglyphContainer);
+      anaglyphContainer = null;
+    }
+  }
+  
   // ===== SPLIT-SCREEN VR FUNCTIONS =====
   function enterSplitScreenMode() {
     if (isSplitScreenMode) return;
@@ -435,23 +574,23 @@ window.addEventListener('DOMContentLoaded', () => {
     `;
     
     // Create separate renderers for each eye
-    const leftRenderer = new THREE.WebGLRenderer({ 
+    splitScreenLeftRenderer = new THREE.WebGLRenderer({ 
       antialias: true,
       powerPreference: "high-performance"
     });
     // Set renderer size to full screen size (will be cropped by container)
-    leftRenderer.setSize(window.innerWidth, window.innerHeight);
-    leftRenderer.setClearColor(0x0a0a0a);
+    splitScreenLeftRenderer.setSize(window.innerWidth, window.innerHeight);
+    splitScreenLeftRenderer.setClearColor(0x0a0a0a);
     
-    const rightRenderer = new THREE.WebGLRenderer({ 
+    splitScreenRightRenderer = new THREE.WebGLRenderer({ 
       antialias: true,
       powerPreference: "high-performance"
     });
-    rightRenderer.setSize(window.innerWidth, window.innerHeight);
-    rightRenderer.setClearColor(0x0a0a0a);
+    splitScreenRightRenderer.setSize(window.innerWidth, window.innerHeight);
+    splitScreenRightRenderer.setClearColor(0x0a0a0a);
     
-    leftEye.appendChild(leftRenderer.domElement);
-    rightEye.appendChild(rightRenderer.domElement);
+    leftEye.appendChild(splitScreenLeftRenderer.domElement);
+    rightEye.appendChild(splitScreenRightRenderer.domElement);
     
     splitScreenContainer.appendChild(leftEye);
     splitScreenContainer.appendChild(rightEye);
@@ -494,10 +633,10 @@ window.addEventListener('DOMContentLoaded', () => {
       }
       
       // Render left eye
-      leftRenderer.render(threeScene, splitScreenLeftCamera);
+      splitScreenLeftRenderer.render(threeScene, splitScreenLeftCamera);
       
       // Render right eye
-      rightRenderer.render(threeScene, splitScreenRightCamera);
+      splitScreenRightRenderer.render(threeScene, splitScreenRightCamera);
       
       requestAnimationFrame(renderSplitScreen);
     }
@@ -527,9 +666,11 @@ window.addEventListener('DOMContentLoaded', () => {
       splitScreenContainer = null;
     }
     
-    // Clean up cameras
+    // Clean up cameras and renderers
     splitScreenLeftCamera = null;
     splitScreenRightCamera = null;
+    splitScreenLeftRenderer = null;
+    splitScreenRightRenderer = null;
     
     console.log('Exited Split-Screen VR mode');
   }
@@ -540,6 +681,9 @@ window.addEventListener('DOMContentLoaded', () => {
     }
     if (isSplitScreenMode) {
       exitSplitScreenMode();
+    }
+    if (isAnaglyphMode) {
+      exitAnaglyphMode();
     }
   }
 
