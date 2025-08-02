@@ -5,6 +5,7 @@
   <title>fami3D</title>
   <script src="https://unpkg.com/jsnes/dist/jsnes.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/webxr-polyfill@latest/build/webxr-polyfill.min.js"></script>
   <style>
     body { 
       background: #222; 
@@ -68,6 +69,19 @@
       justify-content: center;
       font-size: 12px;
       line-height: 1;
+    }
+    #vrBtn {
+      /* Match the other buttons */
+      background: rgba(255,255,255,0.1);
+      border-color: rgba(255,255,255,0.2);
+    }
+    #vrBtn:hover {
+      background: rgba(255,255,255,0.2);
+      border-color: rgba(255,255,255,0.3);
+    }
+    #vrBtn.active {
+      background: rgba(255,255,255,0.3);
+      border-color: rgba(255,255,255,0.4);
     }
     #romfile {
       background: rgba(255,255,255,0.1);
@@ -195,7 +209,6 @@
       z-index: 200;
       align-items: center;
       justify-content: center;
-      /* flex centering, but display: flex will be set by .show class */
     }
     #libraryModal.show {
       display: flex;
@@ -236,6 +249,7 @@
       <button id="helpBtn" title="Help">?</button>
       <button id="menuBtn" title="Menu">☰</button>
       <button id="muteBtn" title="Mute">🔊</button>
+      <button id="vrBtn" title="Enter VR">VR</button>
     </div>
     <div class="controls-row">
       <input type="file" id="romfile" accept=".nes" />
@@ -244,7 +258,7 @@
   </div>
   <div id="helpModal" class="show">
     <div style="background:#222; color:#fff; padding:24px 32px; border-radius:8px; max-width:400px; max-height:80vh; margin:auto; position:relative; box-shadow:0 4px 32px #000; overflow-y:auto;">
-      <button id="closeHelpModal" style="position:absolute; top:8px; right:12px; background:none; border:none; color:#fff; font-size:1.5em; cursor:pointer;">&times;</button>
+      <button id="closeHelpModal" style="position:absolute; top:8px; right:12px; background:none; border:none; color:#fff; font-size:1.5em; cursor:pointer; z-index:10; padding:4px; min-width:24px; min-height:24px; display:flex; align-items:center; justify-content:center;">&times;</button>
       <div style="margin-top:8px; font-size:1.1em; line-height:1.5;">
         <h3 style="margin-top:0; margin-bottom:16px;">fami3D</h3>
         <p style="font-size:0.95em; color:#ffb; margin-bottom:16px;">
@@ -261,6 +275,8 @@
             <li><strong>X / S:</strong> B button (Run/Fire)</li>
             <li><strong>Enter:</strong> Start button</li>
             <li><strong>Shift:</strong> Select button</li>
+            <li><strong>VR Mode:</strong> Click VR button to enter virtual reality</li>
+            <li><strong>VR Controls:</strong> Use VR controller buttons and thumbstick</li>
           </ul>
         </div>
         <div style="margin-bottom:0;">
@@ -290,6 +306,7 @@
   <div id="threejs-container"></div>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128/examples/js/utils/BufferGeometryUtils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128/examples/js/controls/VRControls.js"></script>
   <script src="script.js"></script>
 </body>
 </html>

@@ -1,16 +1,40 @@
 window.addEventListener('DOMContentLoaded', () => {
-  console.log('DOMContentLoaded fired');
-
   // Help button functionality
   const helpBtn = document.getElementById('helpBtn');
   const helpModal = document.getElementById('helpModal');
   const closeHelpModal = document.getElementById('closeHelpModal');
+  
+  console.log('Help elements found:', { helpBtn, helpModal, closeHelpModal });
+  
   helpBtn.addEventListener('click', () => {
     helpModal.classList.add('show');
   });
-  closeHelpModal.addEventListener('click', () => {
+  
+  closeHelpModal.addEventListener('click', (e) => {
+    console.log('Close button clicked');
+    e.preventDefault();
+    e.stopPropagation();
     helpModal.classList.remove('show');
   });
+  
+  // Also allow clicking outside the modal to close it
+  helpModal.addEventListener('click', (e) => {
+    if (e.target === helpModal) {
+      helpModal.classList.remove('show');
+    }
+  });
+  
+  // Allow Escape key to close modal
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && helpModal.classList.contains('show')) {
+      helpModal.classList.remove('show');
+    }
+  });
+
+  // Setup VR after DOM elements are available
+  console.log('Setting up VR...');
+  setupVR();
+  console.log('VR setup complete');
 
   // === Library menu popup logic ===
   const menuBtn = document.getElementById('menuBtn');
@@ -44,25 +68,25 @@ window.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-// --- Get canvas contexts ---
-const bgCanvas = document.getElementById('bgCanvas');
-const bgCtx = bgCanvas.getContext('2d');
+  // --- Get canvas contexts ---
+  const bgCanvas = document.getElementById('bgCanvas');
+  const bgCtx = bgCanvas.getContext('2d');
 
-const spriteCanvas = document.getElementById('spriteCanvas');
-const spriteCtx = spriteCanvas.getContext('2d');
+  const spriteCanvas = document.getElementById('spriteCanvas');
+  const spriteCtx = spriteCanvas.getContext('2d');
 
-const spriteBehindCanvas = document.getElementById('spriteBehindCanvas');
-const spriteBehindCtx = spriteBehindCanvas.getContext('2d');
+  const spriteBehindCanvas = document.getElementById('spriteBehindCanvas');
+  const spriteBehindCtx = spriteBehindCanvas.getContext('2d');
 
-const nesCanvas = document.createElement('canvas');
-  nesCanvas.width = 256; 
-  nesCanvas.height = 240;
-const ctx = nesCanvas.getContext('2d');
-const imageData = ctx.getImageData(0, 0, 256, 240);
+  const nesCanvas = document.createElement('canvas');
+    nesCanvas.width = 256; 
+    nesCanvas.height = 240;
+  const ctx = nesCanvas.getContext('2d');
+  const imageData = ctx.getImageData(0, 0, 256, 240);
 
-let nes = null;
-let animationId = null;
-let romData = null;
+  let nes = null;
+  let animationId = null;
+  let romData = null;
 
   // ===== CENTRAL STATE FLAGS =====
   let use3D = true; // Always use 3D mode
@@ -76,6 +100,16 @@ let romData = null;
   let bgTileGroup, spriteTileGroup;
   let bgTexture, spriteTexture, spriteBehindTexture;
   let bgPanelMesh = null;
+
+  // ===== VR VARIABLES =====
+  let vrSession = null;
+  let vrRenderer = null;
+  let vrCamera = null;
+  let vrControls = null;
+  let isInVR = false;
+  let vrReferenceSpace = null;
+  let vrInputSources = [];
+  var vrButton = null;
 
   // ===== PERFORMANCE OPTIMIZATIONS =====
   const colorCache = new Map();
@@ -122,7 +156,7 @@ let romData = null;
     threeRenderer.setSize(window.innerWidth, window.innerHeight);
     container.appendChild(threeRenderer.domElement);
   
-  // Scene setup
+    // Scene setup
     threeScene = new THREE.Scene();
     threeScene.background = new THREE.Color(0x0a0a0a);
 
@@ -155,20 +189,315 @@ let romData = null;
     directionalLight.castShadow = true;
     threeScene.add(directionalLight);
 
-    // Grid and axes
-
-    // REMOVE axesHelper (wireframe showing x, y, z axes)
-    // const axesHelper = new THREE.AxesHelper(5);
-    // threeScene.add(axesHelper);
-
     // Create 3D background tiles (no flat plane)
     create3DBackgroundTiles();
 
-    // Background plane removed
-
-    // Removed createSpritePlanes() call since we now use individual sprite meshes
-
     console.log('Three.js setup complete - 3D tiles and sprites');
+  }
+
+  // ===== VR FUNCTIONS =====
+  function setupVR() {
+    try {
+      const vrButtonElement = document.getElementById('vrBtn');
+      if (!vrButtonElement) {
+        console.log('VR button not found');
+        return;
+      }
+      
+      // Assign to global variable
+      vrButton = vrButtonElement;
+
+      // Make VR button visible by default
+      vrButton.style.display = 'inline-flex';
+      vrButton.style.alignItems = 'center';
+      vrButton.style.justifyContent = 'center';
+
+      // Check if WebXR is supported
+      if (!navigator.xr) {
+        console.log('WebXR not supported');
+        if (vrButton) {
+          vrButton.style.opacity = '0.5';
+          vrButton.title = 'VR not supported in this browser';
+        }
+        return;
+      }
+
+      // Check if VR is available
+      navigator.xr.isSessionSupported('immersive-vr').then((supported) => {
+        if (supported) {
+            vrButton.addEventListener('click', onVRButtonClick);
+            vrButton.title = 'Enter Virtual Reality Mode';
+            console.log('VR supported');
+        } else {
+            console.log('VR not supported');
+            vrButton.style.opacity = '0.5';
+            vrButton.title = 'VR not supported on this device';
+        }
+      }).catch((error) => {
+        console.error('VR support check failed:', error);
+        if (vrButton) {
+          vrButton.style.opacity = '0.5';
+        if (error.name === 'SecurityError') {
+          vrButton.title = 'VR blocked by browser permissions';
+        } else {
+          vrButton.title = 'VR support check failed';
+        }
+        }
+      });
+      } catch (error) {
+        console.error('Error setting up VR:', error);
+      }
+  }
+
+  function onVRButtonClick() {
+    if (isInVR) {
+      exitVR();
+    } else {
+      enterVR();
+    }
+  }
+
+  function enterVR() {
+    if (!navigator.xr) return;
+
+    const sessionOptions = {
+      optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
+    };
+
+    navigator.xr.requestSession('immersive-vr', sessionOptions).then((session) => {
+      vrSession = session;
+      isInVR = true;
+      vrButton.classList.add('active');
+      vrButton.textContent = 'Exit VR';
+
+      // Enable VR on existing renderer
+      threeRenderer.xr.enabled = true;
+      threeRenderer.xr.setReferenceSpaceType('local');
+
+      // Use existing camera but adjust position for VR
+      vrCamera = threeCamera;
+      vrCamera.position.set(0, 1.6, 6); // Eye level, closer to screen for better immersion
+      vrCamera.lookAt(0, 0, 0);
+      
+      // Adjust camera for VR comfort
+      vrCamera.fov = 70;
+      vrCamera.updateProjectionMatrix();
+
+      // Setup VR controls
+      vrControls = new THREE.VRControls(vrCamera);
+      vrControls.setSize(window.innerWidth, window.innerHeight);
+
+      // Add VR-specific lighting and environment
+      setupVREnvironment();
+      
+      // Optimize scene for VR
+      optimizeSceneForVR();
+
+      // Handle VR session events
+      session.addEventListener('end', onSessionEnd);
+      session.addEventListener('select', onSelect);
+      session.addEventListener('selectstart', onSelectStart);
+      session.addEventListener('selectend', onSelectEnd);
+
+      // Start VR session
+      threeRenderer.setAnimationLoop(onVRRender);
+      session.requestReferenceSpace('local').then((referenceSpace) => {
+        vrReferenceSpace = referenceSpace;
+        session.requestAnimationFrame(onVRFrame);
+      });
+
+      console.log('Entered VR mode');
+      
+      // Show VR status
+      vrButton.style.background = 'linear-gradient(45deg, #f44336, #d32f2f)';
+      vrButton.textContent = 'Exit VR';
+    }).catch((error) => {
+      console.error('Failed to enter VR:', error);
+      alert('Failed to enter VR mode. Please make sure your VR headset is connected and try again.');
+    });
+  }
+
+  function exitVR() {
+    if (vrSession) {
+      vrSession.end();
+    }
+  }
+
+  function onSessionEnd() {
+    isInVR = false;
+    vrButton.classList.remove('active');
+    vrButton.textContent = 'VR';
+    
+    // Disable VR on renderer
+    if (threeRenderer) {
+      threeRenderer.xr.enabled = false;
+      threeRenderer.setAnimationLoop(null);
+    }
+    
+    // Reset camera position
+    if (threeCamera) {
+      threeCamera.position.set(0, 0, 16);
+      threeCamera.lookAt(0, 0, 0);
+    }
+    
+    vrSession = null;
+    vrCamera = null;
+    vrControls = null;
+    console.log('Exited VR mode');
+  }
+
+  function onSelect(event) {
+    // Handle VR controller input
+    console.log('VR select event');
+  }
+
+  function onSelectStart(event) {
+    // Handle VR controller button press start
+  }
+
+  function onSelectEnd(event) {
+    // Handle VR controller button press end
+  }
+
+  function onVRFrame(time, frame) {
+    if (vrSession) {
+      vrSession.requestAnimationFrame(onVRFrame);
+    }
+  }
+
+  function onVRRender() {
+    if (!isInVR || !threeRenderer || !vrCamera) return;
+
+    // Update VR controls
+    if (vrControls) {
+      vrControls.update();
+    }
+
+    // Handle VR input
+    handleVRInput();
+
+    // Update 3D scene if needed
+    if (nesFrameChanged) {
+      updateThreeScene();
+      nesFrameChanged = false;
+    }
+
+    // Render the scene for VR
+    threeRenderer.render(threeScene, vrCamera);
+  }
+
+  // ===== VR ENVIRONMENT SETUP =====
+  function setupVREnvironment() {
+    // Add ambient lighting for better VR visibility
+    const vrAmbientLight = new THREE.AmbientLight(0xffffff, 0.8);
+    threeScene.add(vrAmbientLight);
+
+    // Add directional lighting from above
+    const vrDirectionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    vrDirectionalLight.position.set(0, 10, 5);
+    vrDirectionalLight.castShadow = true;
+    threeScene.add(vrDirectionalLight);
+
+    // Add a subtle room environment (optional)
+    const roomGeometry = new THREE.BoxGeometry(20, 10, 20);
+    const roomMaterial = new THREE.MeshBasicMaterial({
+      color: 0x222222,
+      transparent: true,
+      opacity: 0.1,
+      side: THREE.BackSide
+    });
+    const room = new THREE.Mesh(roomGeometry, roomMaterial);
+    room.position.set(0, 0, 0);
+    threeScene.add(room);
+  }
+
+  // ===== VR PERFORMANCE OPTIMIZATION =====
+  function optimizeSceneForVR() {
+    // Reduce LOD for better VR performance
+    if (threeRenderer) {
+      threeRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    }
+    
+    // Optimize camera settings for VR
+    if (vrCamera) {
+      vrCamera.fov = 70; // Standard VR FOV
+      vrCamera.updateProjectionMatrix();
+    }
+    
+    // Enable shadows for better VR immersion
+    if (threeRenderer) {
+      threeRenderer.shadowMap.enabled = true;
+      threeRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    }
+  }
+
+  // ===== VR CONTROLLER INPUT HANDLING =====
+  function handleVRInput() {
+    if (!isInVR || !vrSession) return;
+
+    // Get input sources
+    vrSession.inputSources.forEach((inputSource) => {
+      if (inputSource.handedness === 'right') {
+        // Handle right controller
+        if (inputSource.gamepad) {
+          const gamepad = inputSource.gamepad;
+          // Map controller buttons to NES controls
+          if (gamepad.buttons[0] && gamepad.buttons[0].pressed) {
+            // A button
+            nes.buttonDown(1, 0);
+          } else {
+            nes.buttonUp(1, 0);
+          }
+          if (gamepad.buttons[1] && gamepad.buttons[1].pressed) {
+            // B button
+            nes.buttonDown(1, 1);
+          } else {
+            nes.buttonUp(1, 1);
+          }
+          if (gamepad.buttons[2] && gamepad.buttons[2].pressed) {
+            // Select button
+            nes.buttonDown(1, 2);
+          } else {
+            nes.buttonUp(1, 2);
+          }
+          if (gamepad.buttons[3] && gamepad.buttons[3].pressed) {
+            // Start button
+            nes.buttonDown(1, 3);
+          } else {
+            nes.buttonUp(1, 3);
+          }
+
+          // Handle thumbstick for D-pad
+          if (gamepad.axes && gamepad.axes.length >= 2) {
+            const x = gamepad.axes[0];
+            const y = gamepad.axes[1];
+            const threshold = 0.5;
+
+            // D-pad mapping
+            if (y < -threshold) {
+              nes.buttonDown(1, 4); // Up
+            } else {
+              nes.buttonUp(1, 4);
+            }
+            if (y > threshold) {
+              nes.buttonDown(1, 5); // Down
+            } else {
+              nes.buttonUp(1, 5);
+            }
+            if (x < -threshold) {
+              nes.buttonDown(1, 6); // Left
+            } else {
+              nes.buttonUp(1, 6);
+            }
+            if (x > threshold) {
+              nes.buttonDown(1, 7); // Right
+            } else {
+              nes.buttonUp(1, 7);
+            }
+          }
+        }
+      }
+    });
   }
 
   function createPixelExtrudedTileGeometry(tileCanvas, avgColor, cacheKey) {
@@ -889,13 +1218,15 @@ let romData = null;
       return;
     }
     lastRenderTime = now;
+    
     if (nesFrameChanged) {
       drawLayeredCanvases(); // 2D canvas drawing
-      if (use3D) {
-        updateThreeScene(); // 3D from canvas pixels
+      if (use3D && !isInVR) {
+        updateThreeScene(); // 3D from canvas pixels (only when not in VR)
       }
       nesFrameChanged = false;
     }
+    
     requestAnimationFrame(renderFrame);
   }
 
@@ -1052,77 +1383,43 @@ let romData = null;
       spriteBehindData[i] = 0; spriteBehindData[i + 1] = 0; spriteBehindData[i + 2] = 0; spriteBehindData[i + 3] = 0;
     }
     
-  const spriteSize = ppu.f_spriteSize ? 16 : 8;
+    const spriteSize = ppu.f_spriteSize ? 16 : 8;
     
-  for (let i = 0; i < 64; i++) {
-    let sx = ppu.sprX ? ppu.sprX[i] : 0;
-    let sy = ppu.sprY ? ppu.sprY[i] : 0;
-    const tileIdx = ppu.sprTile ? ppu.sprTile[i] : 0;
-      
-    let palIdx = 0;
-    let priority = 0;
-    let flipH = 0, flipV = 0;
-      
-    if (ppu.spriteMem && typeof ppu.spriteMem[i * 4 + 2] === 'number') {
-      const attr = ppu.spriteMem[i * 4 + 2];
-      palIdx = attr & 0x3;
-      priority = (attr >> 5) & 1;
-      flipH = (attr >> 6) & 1;
-      flipV = (attr >> 7) & 1;
+    for (let i = 0; i < 64; i++) {
+      let sx = ppu.sprX ? ppu.sprX[i] : 0;
+      let sy = ppu.sprY ? ppu.sprY[i] : 0;
+      const tileIdx = ppu.sprTile ? ppu.sprTile[i] : 0;
+        
+      let palIdx = 0;
+      let priority = 0;
+      let flipH = 0, flipV = 0;
+        
+      if (ppu.spriteMem && typeof ppu.spriteMem[i * 4 + 2] === 'number') {
+        const attr = ppu.spriteMem[i * 4 + 2];
+        palIdx = attr & 0x3;
+        priority = (attr >> 5) & 1;
+        flipH = (attr >> 6) & 1;
+        flipV = (attr >> 7) & 1;
+      }
+        
+      sy += 1;
+        
+      if (spriteSize === 8) {
+          render8x8SpriteOptimized(sx, sy, tileIdx, palIdx, priority, flipH, flipV, ppu);
+      } else {
+          render8x16SpriteOptimized(sx, sy, tileIdx, palIdx, priority, flipH, flipV, ppu);
+      }
     }
-      
-    sy += 1;
-      
-    if (spriteSize === 8) {
-        render8x8SpriteOptimized(sx, sy, tileIdx, palIdx, priority, flipH, flipV, ppu);
-  } else {
-        render8x16SpriteOptimized(sx, sy, tileIdx, palIdx, priority, flipH, flipV, ppu);
-    }
-  }
     
     spriteCtx.putImageData(spriteImageData, 0, 0);
     spriteBehindCtx.putImageData(spriteBehindImageData, 0, 0);
-}
+  }
 
   function render8x8SpriteOptimized(sx, sy, tileIdx, palIdx, priority, flipH, flipV, ppu) {
     const ptBase = ppu.f_spPatternTable ? 0x1000 : 0x0000;
-  const ptAddr = ptBase + tileIdx * 16;
+    const ptAddr = ptBase + tileIdx * 16;
     const targetData = priority === 1 ? spriteBehindImageData.data : spriteImageData.data;
     
-  for (let row = 0; row < 8; row++) {
-    const plane0 = ppu.vramMem ? ppu.vramMem[ptAddr + row] : 0;
-    const plane1 = ppu.vramMem ? ppu.vramMem[ptAddr + row + 8] : 0;
-      
-    for (let col = 0; col < 8; col++) {
-      const bit0 = (plane0 >> (7 - col)) & 1;
-      const bit1 = (plane1 >> (7 - col)) & 1;
-      const colorIdx = (bit1 << 1) | bit0;
-        
-      if (colorIdx === 0) continue;
-        
-      const rgb = getSpriteColor(ppu, palIdx, colorIdx);
-        const drawX = flipH ? (sx + 7 - col) : (sx + col);
-        const drawY = flipV ? (sy + 7 - row) : (sy + row);
-        
-        if (drawX >= 0 && drawX < 256 && drawY >= 0 && drawY < 240) {
-          const index = (drawY * 256 + drawX) * 4;
-          targetData[index] = rgb[0];
-          targetData[index + 1] = rgb[1];
-          targetData[index + 2] = rgb[2];
-          targetData[index + 3] = 255;
-        }
-      }
-    }
-  }
-
-  function render8x16SpriteOptimized(sx, sy, tileIdx, palIdx, priority, flipH, flipV, ppu) {
-    const targetData = priority === 1 ? spriteBehindImageData.data : spriteImageData.data;
-    
-  for (let part = 0; part < 2; part++) {
-    const thisTileIdx = (tileIdx & 0xFE) + part;
-    const ptBase = (thisTileIdx & 1) ? 0x1000 : 0x0000;
-    const ptAddr = ptBase + (thisTileIdx >> 1) * 16;
-      
     for (let row = 0; row < 8; row++) {
       const plane0 = ppu.vramMem ? ppu.vramMem[ptAddr + row] : 0;
       const plane1 = ppu.vramMem ? ppu.vramMem[ptAddr + row + 8] : 0;
@@ -1136,9 +1433,7 @@ let romData = null;
           
         const rgb = getSpriteColor(ppu, palIdx, colorIdx);
           const drawX = flipH ? (sx + 7 - col) : (sx + col);
-          const drawY = flipV ? 
-            (sy + 15 - (row + part * 8)) : 
-            (sy + row + part * 8);
+          const drawY = flipV ? (sy + 7 - row) : (sy + row);
           
           if (drawX >= 0 && drawX < 256 && drawY >= 0 && drawY < 240) {
             const index = (drawY * 256 + drawX) * 4;
@@ -1149,7 +1444,43 @@ let romData = null;
           }
         }
       }
-    }
+  }
+
+  function render8x16SpriteOptimized(sx, sy, tileIdx, palIdx, priority, flipH, flipV, ppu) {
+    const targetData = priority === 1 ? spriteBehindImageData.data : spriteImageData.data;
+    
+    for (let part = 0; part < 2; part++) {
+      const thisTileIdx = (tileIdx & 0xFE) + part;
+      const ptBase = (thisTileIdx & 1) ? 0x1000 : 0x0000;
+      const ptAddr = ptBase + (thisTileIdx >> 1) * 16;
+        
+      for (let row = 0; row < 8; row++) {
+        const plane0 = ppu.vramMem ? ppu.vramMem[ptAddr + row] : 0;
+        const plane1 = ppu.vramMem ? ppu.vramMem[ptAddr + row + 8] : 0;
+          
+        for (let col = 0; col < 8; col++) {
+          const bit0 = (plane0 >> (7 - col)) & 1;
+          const bit1 = (plane1 >> (7 - col)) & 1;
+          const colorIdx = (bit1 << 1) | bit0;
+            
+          if (colorIdx === 0) continue;
+            
+          const rgb = getSpriteColor(ppu, palIdx, colorIdx);
+            const drawX = flipH ? (sx + 7 - col) : (sx + col);
+            const drawY = flipV ? 
+              (sy + 15 - (row + part * 8)) : 
+              (sy + row + part * 8);
+            
+            if (drawX >= 0 && drawX < 256 && drawY >= 0 && drawY < 240) {
+              const index = (drawY * 256 + drawX) * 4;
+              targetData[index] = rgb[0];
+              targetData[index + 1] = rgb[1];
+              targetData[index + 2] = rgb[2];
+              targetData[index + 3] = 255;
+            }
+          }
+        }
+     }
   }
 
   // ===== UTILITY FUNCTIONS =====
