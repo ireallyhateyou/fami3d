@@ -35,6 +35,13 @@ window.addEventListener('DOMContentLoaded', () => {
   console.log('Setting up VR...');
   setupVR();
   console.log('VR setup complete');
+  
+  // Disable VR button until game is loaded
+  const vrButtonElement = document.getElementById('vrBtn');
+  if (vrButtonElement) {
+    vrButtonElement.disabled = true;
+    vrButtonElement.title = 'Load a ROM first';
+  }
 
   // === Library menu popup logic ===
   const menuBtn = document.getElementById('menuBtn');
@@ -61,6 +68,14 @@ window.addEventListener('DOMContentLoaded', () => {
         const arrayBuffer = await response.arrayBuffer();
         romData = arrayBufferToBinaryString(arrayBuffer); // Always use binary string for jsnes
         libraryModal.classList.remove('show');
+        
+        // Enable VR button when ROM is loaded from library
+        const vrButtonElement = document.getElementById('vrBtn');
+        if (vrButtonElement) {
+          vrButtonElement.disabled = false;
+          vrButtonElement.title = 'Enter VR Mode';
+        }
+        
         startNesEmulator();
       } catch (err) {
         console.error('Failed to load ROM:', err);
@@ -110,6 +125,12 @@ window.addEventListener('DOMContentLoaded', () => {
   let vrReferenceSpace = null;
   let vrInputSources = [];
   var vrButton = null;
+  
+  // ===== SPLIT-SCREEN VR VARIABLES =====
+  let isSplitScreenMode = false;
+  let splitScreenLeftCamera = null;
+  let splitScreenRightCamera = null;
+  let splitScreenContainer = null;
 
   // ===== PERFORMANCE OPTIMIZATIONS =====
   const colorCache = new Map();
@@ -159,7 +180,8 @@ window.addEventListener('DOMContentLoaded', () => {
       antialias: true,
       powerPreference: "high-performance",
       stencil: false,
-      depth: true
+      depth: true,
+      xrCompatible: true  
     });
     threeRenderer.setSize(window.innerWidth, window.innerHeight);
     container.appendChild(threeRenderer.domElement);
@@ -171,7 +193,7 @@ window.addEventListener('DOMContentLoaded', () => {
     // Camera setup
     threeCamera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
     // Place camera level with the NES screen, not above
-    threeCamera.position.set(0, 0, 16); // y=0 (level), z=16 (distance)
+    threeCamera.position.set(0, 0, 12); // y=0 (level), z=12 (closer for stronger 3D effect)
     threeCamera.lookAt(0, 0, 0);
 
     // Controls setup
@@ -220,14 +242,24 @@ window.addEventListener('DOMContentLoaded', () => {
       vrButton.style.alignItems = 'center';
       vrButton.style.justifyContent = 'center';
 
-      // Check if WebXR is supported
+      // Check if WebXR is supported or blocked by HTTP
       if (!navigator.xr) {
-        console.log('WebXR not supported');
-        vrButton.style.opacity = '0.5';
-        vrButton.title = 'VR not supported in this browser';
+        console.log('WebXR not supported, enabling split-screen mode');
+        vrButton.title = 'Enter Split-Screen VR Mode';
         vrButton.textContent = 'VR';
         vrButton.addEventListener('click', () => {
-          alert('VR is not supported in this browser. Try using Chrome, Firefox, or Edge with WebXR support.');
+          enterSplitScreenMode();
+        });
+        return;
+      }
+      
+      // Check if we're on HTTP (WebXR requires HTTPS)
+      if (location.protocol === 'http:' && location.hostname !== 'localhost') {
+        console.log('WebXR blocked by HTTP protocol, enabling split-screen mode');
+        vrButton.title = 'Enter Split-Screen VR Mode (HTTPS required for WebXR)';
+        vrButton.textContent = 'VR';
+        vrButton.addEventListener('click', () => {
+          enterSplitScreenMode();
         });
         return;
       }
@@ -240,27 +272,28 @@ window.addEventListener('DOMContentLoaded', () => {
             buttonElement.title = 'Enter Virtual Reality Mode';
             console.log('VR supported');
         } else {
-            console.log('VR not supported');
-            buttonElement.style.opacity = '0.5';
-            buttonElement.title = 'VR not supported on this device';
+            console.log('VR not supported, enabling split-screen mode');
+            buttonElement.title = 'Enter Split-Screen VR Mode';
             buttonElement.textContent = 'VR';
             buttonElement.addEventListener('click', () => {
-              alert('VR is not supported on this device. You need a VR headset or VR-capable device.');
+              enterSplitScreenMode();
             });
         }
-      }).catch((error) => {
+            }).catch((error) => {
         console.error('VR support check failed:', error);
         buttonElement.style.opacity = '0.5';
         buttonElement.textContent = 'VR';
-        if (error.name === 'SecurityError') { 
-          buttonElement.title = 'VR blocked by browser permissions';
+        
+        // Check if it's a security error (likely HTTP blocking WebXR)
+        if (error.name === 'SecurityError' || error.name === 'NotAllowedError') {
+          buttonElement.title = 'Enter Split-Screen VR Mode (HTTPS required for WebXR)';
           buttonElement.addEventListener('click', () => {
-            alert('VR is blocked by browser permissions. Please allow VR access in your browser settings.');
+            enterSplitScreenMode();
           });
         } else {
-          buttonElement.title = 'VR support check failed';
+          buttonElement.title = 'Enter Split-Screen VR Mode';
           buttonElement.addEventListener('click', () => {
-            alert('VR support check failed. Please try refreshing the page or using a different browser.');
+            enterSplitScreenMode();
           });
         }
       });
@@ -270,10 +303,20 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   function onVRButtonClick() {
+    const vrButtonElement = document.getElementById('vrBtn');
+    if (vrButtonElement && vrButtonElement.disabled) {
+      alert('Please load a ROM first before entering VR mode.');
+      return;
+    }
+    
     if (isInVR) {
       exitVR();
     } else {
-      enterVR();
+      if (navigator.xr && navigator.xr.isSessionSupported) {
+        enterVR();
+      } else {
+        enterSplitScreenMode();
+      }
     }
   }
 
@@ -333,13 +376,163 @@ window.addEventListener('DOMContentLoaded', () => {
       vrButton.textContent = 'Exit VR';
     }).catch((error) => {
       console.error('Failed to enter VR:', error);
-      alert('Failed to enter VR mode. Please make sure your VR headset is connected and try again.');
+      // Fallback to split-screen mode
+      enterSplitScreenMode();
     });
+  }
+
+  // ===== SPLIT-SCREEN VR FUNCTIONS =====
+  function enterSplitScreenMode() {
+    if (isSplitScreenMode) return;
+    
+    console.log('Entering Split-Screen VR mode');
+    isSplitScreenMode = true;
+    isInVR = true;
+    
+    // Get the VR button element safely
+    const vrButtonElement = document.getElementById('vrBtn');
+    if (vrButtonElement) {
+      vrButtonElement.classList.add('active');
+      vrButtonElement.textContent = 'Exit VR';
+      vrButtonElement.style.background = 'linear-gradient(45deg, #4CAF50, #45a049)';
+    }
+    
+    // Create split-screen container
+    splitScreenContainer = document.createElement('div');
+    splitScreenContainer.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: #000;
+      z-index: 1000;
+      display: flex;
+      flex-direction: row;
+    `;
+    
+    // Create left and right eye views (side by side - like Google Cardboard)
+    const leftEye = document.createElement('div');
+    leftEye.style.cssText = `
+      width: 50%;
+      height: 100%;
+      overflow: hidden;
+      position: relative;
+    `;
+    
+    const rightEye = document.createElement('div');
+    rightEye.style.cssText = `
+      width: 50%;
+      height: 100%;
+      overflow: hidden;
+      position: relative;
+    `;
+    
+    // Create separate renderers for each eye
+    const leftRenderer = new THREE.WebGLRenderer({ 
+      antialias: true,
+      powerPreference: "high-performance"
+    });
+    leftRenderer.setSize(window.innerWidth / 2, window.innerHeight);
+    leftRenderer.setClearColor(0x0a0a0a);
+    
+    const rightRenderer = new THREE.WebGLRenderer({ 
+      antialias: true,
+      powerPreference: "high-performance"
+    });
+    rightRenderer.setSize(window.innerWidth / 2, window.innerHeight);
+    rightRenderer.setClearColor(0x0a0a0a);
+    
+    leftEye.appendChild(leftRenderer.domElement);
+    rightEye.appendChild(rightRenderer.domElement);
+    
+    splitScreenContainer.appendChild(leftEye);
+    splitScreenContainer.appendChild(rightEye);
+    document.body.appendChild(splitScreenContainer);
+    
+    // Create cameras with proper stereoscopic offset for strong 3D effect
+    splitScreenLeftCamera = threeCamera.clone();
+    splitScreenRightCamera = threeCamera.clone();
+    
+    // Enhanced IPD (Interpupillary Distance) for more pronounced 3D effect
+    // Standard IPD is 64mm, but we can increase for stronger effect
+    const ipd = 0.12; // Increased for more dramatic stereoscopic separation
+    
+    // Offset cameras horizontally for proper stereoscopic separation
+    splitScreenLeftCamera.position.x -= ipd / 2;
+    splitScreenRightCamera.position.x += ipd / 2;
+    
+    // Slightly different FOV for each eye to enhance depth perception
+    // This creates a more natural stereoscopic effect
+    splitScreenLeftCamera.fov = 68;
+    splitScreenRightCamera.fov = 68;
+    
+    // Update projection matrices
+    splitScreenLeftCamera.updateProjectionMatrix();
+    splitScreenRightCamera.updateProjectionMatrix();
+    
+    // Add click to exit
+    splitScreenContainer.addEventListener('click', () => {
+      exitSplitScreenMode();
+    });
+    
+    // Start split-screen render loop
+    function renderSplitScreen() {
+      if (!isSplitScreenMode) return;
+      
+      // Update scene if needed
+      if (nesFrameChanged) {
+        updateThreeScene();
+        nesFrameChanged = false;
+      }
+      
+      // Render left eye
+      leftRenderer.render(threeScene, splitScreenLeftCamera);
+      
+      // Render right eye
+      rightRenderer.render(threeScene, splitScreenRightCamera);
+      
+      requestAnimationFrame(renderSplitScreen);
+    }
+    
+    renderSplitScreen();
+    console.log('Split-Screen VR mode active');
+  }
+  
+  function exitSplitScreenMode() {
+    if (!isSplitScreenMode) return;
+    
+    console.log('Exiting Split-Screen VR mode');
+    isSplitScreenMode = false;
+    isInVR = false;
+    
+    // Get the VR button element safely
+    const vrButtonElement = document.getElementById('vrBtn');
+    if (vrButtonElement) {
+      vrButtonElement.classList.remove('active');
+      vrButtonElement.textContent = 'VR';
+      vrButtonElement.style.background = '';
+    }
+    
+    // Remove split-screen container
+    if (splitScreenContainer) {
+      document.body.removeChild(splitScreenContainer);
+      splitScreenContainer = null;
+    }
+    
+    // Clean up cameras
+    splitScreenLeftCamera = null;
+    splitScreenRightCamera = null;
+    
+    console.log('Exited Split-Screen VR mode');
   }
 
   function exitVR() {
     if (vrSession) {
       vrSession.end();
+    }
+    if (isSplitScreenMode) {
+      exitSplitScreenMode();
     }
   }
 
@@ -367,16 +560,35 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   function onSelect(event) {
-    // Handle VR controller input
+    // Handle VR controller input - map to game controls
     console.log('VR select event');
+    
+    // Map VR controller input to game controls
+    if (nes && nes.isRunning()) {
+      // A button (jump) - primary trigger
+      nes.buttonDown(1, 0); // A button
+      setTimeout(() => nes.buttonUp(1, 0), 100); // Release after 100ms
+    }
   }
 
   function onSelectStart(event) {
     // Handle VR controller button press start
+    console.log('VR select start');
+    
+    if (nes && nes.isRunning()) {
+      // B button (run/fire) - secondary trigger
+      nes.buttonDown(1, 1); // B button
+    }
   }
 
   function onSelectEnd(event) {
     // Handle VR controller button press end
+    console.log('VR select end');
+    
+    if (nes && nes.isRunning()) {
+      // Release B button
+      nes.buttonUp(1, 1); // B button
+    }
   }
 
   function onVRFrame(time, frame) {
@@ -453,7 +665,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // ===== VR CONTROLLER INPUT HANDLING =====
   function handleVRInput() {
-    if (!isInVR || !vrSession) return;
+    if (!isInVR || !vrSession || !nes || !nes.isRunning()) return;
 
     // Get input sources
     vrSession.inputSources.forEach((inputSource) => {
@@ -461,63 +673,95 @@ window.addEventListener('DOMContentLoaded', () => {
         // Handle right controller
         if (inputSource.gamepad) {
           const gamepad = inputSource.gamepad;
+          
           // Map controller buttons to NES controls
           if (gamepad.buttons[0] && gamepad.buttons[0].pressed) {
-            // A button
+            // A button (jump)
             nes.buttonDown(1, 0);
           } else {
             nes.buttonUp(1, 0);
           }
+          
           if (gamepad.buttons[1] && gamepad.buttons[1].pressed) {
-            // B button
+            // B button (run/fire)
             nes.buttonDown(1, 1);
           } else {
             nes.buttonUp(1, 1);
           }
+          
           if (gamepad.buttons[2] && gamepad.buttons[2].pressed) {
             // Select button
             nes.buttonDown(1, 2);
           } else {
             nes.buttonUp(1, 2);
           }
+          
           if (gamepad.buttons[3] && gamepad.buttons[3].pressed) {
             // Start button
             nes.buttonDown(1, 3);
           } else {
             nes.buttonUp(1, 3);
           }
-
-          // Handle thumbstick for D-pad
+          
+          // Handle thumbstick for D-pad movement
           if (gamepad.axes && gamepad.axes.length >= 2) {
-            const x = gamepad.axes[0];
-            const y = gamepad.axes[1];
-            const threshold = 0.5;
-
-            // D-pad mapping
-            if (y < -threshold) {
-              nes.buttonDown(1, 4); // Up
-            } else {
+            const xAxis = gamepad.axes[0]; // Left/Right
+            const yAxis = gamepad.axes[1]; // Up/Down
+            
+            // Dead zone to prevent drift
+            const deadZone = 0.3;
+            
+            // Handle horizontal movement (Left/Right)
+            if (xAxis < -deadZone) {
+              // Left
+              nes.buttonDown(1, 4);
+              nes.buttonUp(1, 5);
+            } else if (xAxis > deadZone) {
+              // Right
+              nes.buttonDown(1, 5);
               nes.buttonUp(1, 4);
-            }
-            if (y > threshold) {
-              nes.buttonDown(1, 5); // Down
             } else {
+              // Center - release both
+              nes.buttonUp(1, 4);
               nes.buttonUp(1, 5);
             }
-            if (x < -threshold) {
-              nes.buttonDown(1, 6); // Left
-            } else {
+            
+            // Handle vertical movement (Up/Down)
+            if (yAxis < -deadZone) {
+              // Up
+              nes.buttonDown(1, 6);
+              nes.buttonUp(1, 7);
+            } else if (yAxis > deadZone) {
+              // Down
+              nes.buttonDown(1, 7);
               nes.buttonUp(1, 6);
-            }
-            if (x > threshold) {
-              nes.buttonDown(1, 7); // Right
             } else {
+              // Center - release both
+              nes.buttonUp(1, 6);
               nes.buttonUp(1, 7);
             }
           }
         }
       }
+      
+      // Handle left controller for additional controls
+      if (inputSource.handedness === 'left') {
+        if (inputSource.gamepad) {
+          const gamepad = inputSource.gamepad;
+          
+          // Use left controller for menu navigation
+          if (gamepad.buttons[0] && gamepad.buttons[0].pressed) {
+            // Quick pause/unpause
+            if (nes.isRunning()) {
+              nes.stop();
+            } else {
+              nes.start();
+            }
+          }
+        }
+      }
     });
+
   }
 
   function createPixelExtrudedTileGeometry(tileCanvas, avgColor, cacheKey) {
@@ -545,8 +789,8 @@ window.addEventListener('DOMContentLoaded', () => {
           (b - bgColor[2]) ** 2
         );
         if (imgData[idx + 3] > 0 && dist > 8) {
-          // Move voxel geometry a tiny bit farther back to avoid Z-fighting with overlay
-          const voxelDepth = 0.35;
+          // Enhanced voxel depth for stronger 3D stereoscopic effect
+          const voxelDepth = 0.5; // Increased depth for more pronounced 3D effect
           // Offset by an extra 0.03 units farther back
           const box = new THREE.BoxGeometry(0.0625, 0.0625, voxelDepth);
           box.translate((px - 4) * 0.0625 + 0.03125, (3.5 - py) * 0.0625 + 0.03125, 1.01 - voxelDepth/2 - 0.03);
@@ -822,14 +1066,6 @@ window.addEventListener('DOMContentLoaded', () => {
     return 0.05 + 0.95 * prop;
   }
 
-  // Removed unused sprite mesh variables - no longer needed with individual sprite meshes
-
-  // ===== FAST MERGED SPRITES =====
-  // Removed createSpritePlanes function - no longer needed since we use individual sprite meshes
-
-  // ===== SPRITE OVERLAY PLANE (2D FLAT SPRITES) =====
-  // Removed sprite overlay plane variables and functions - no longer needed
-
   function create3DSpriteMeshes() {
     if (!threeScene) return;
     // Remove old sprite meshes if any
@@ -965,9 +1201,9 @@ window.addEventListener('DOMContentLoaded', () => {
             );
             
             if (dist > 8) {
-              // Create voxel for this pixel
+              // Create voxel for this pixel with enhanced depth for stronger 3D stereoscopic effect
               const voxelSize = 1 / 16; // Scale to NES coordinate system
-              const box = new THREE.BoxGeometry(voxelSize, voxelSize, 0.3); // Reduced depth from 0.8 to 0.3
+              const box = new THREE.BoxGeometry(voxelSize, voxelSize, 0.5); // Increased depth for more pronounced 3D effect
               box.translate(
                 (px - spriteSize/2) * voxelSize + voxelSize/2,
                 (spriteSize/2 - py) * voxelSize + voxelSize/2,
@@ -1034,6 +1270,7 @@ window.addEventListener('DOMContentLoaded', () => {
       }
     }
   }
+  
   function render8x16SpriteToCanvas(ctx, tileIdx, palIdx, flipH, flipV, ppu) {
     for (let part = 0; part < 2; part++) {
       const thisTileIdx = (tileIdx & 0xFE) + part;
@@ -1056,6 +1293,7 @@ window.addEventListener('DOMContentLoaded', () => {
       }
     }
   }
+
   // ===== 3D SCENE UPDATE (TILES + OVERLAY) =====
   function updateThreeScene() {
     if (!use3D || !threeScene) return;
@@ -1542,6 +1780,13 @@ function getSpriteColor(ppu, palIdx, colorIdx) {
     reader.onload = function(event) {
       romData = event.target.result;
       document.getElementById('startBtn').disabled = false;
+      
+      // Enable VR button when ROM is loaded
+      const vrButtonElement = document.getElementById('vrBtn');
+      if (vrButtonElement) {
+        vrButtonElement.disabled = false;
+        vrButtonElement.title = 'Enter VR Mode';
+      }
     };
     reader.readAsBinaryString(file);
   });
