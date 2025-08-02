@@ -70,13 +70,13 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // --- Get canvas contexts ---
   const bgCanvas = document.getElementById('bgCanvas');
-  const bgCtx = bgCanvas.getContext('2d');
+  const bgCtx = bgCanvas.getContext('2d', { willReadFrequently: true });
 
   const spriteCanvas = document.getElementById('spriteCanvas');
-  const spriteCtx = spriteCanvas.getContext('2d');
+  const spriteCtx = spriteCanvas.getContext('2d', { willReadFrequently: true });
 
   const spriteBehindCanvas = document.getElementById('spriteBehindCanvas');
-  const spriteBehindCtx = spriteBehindCanvas.getContext('2d');
+  const spriteBehindCtx = spriteBehindCanvas.getContext('2d', { willReadFrequently: true });
 
   const nesCanvas = document.createElement('canvas');
     nesCanvas.width = 256; 
@@ -116,6 +116,9 @@ window.addEventListener('DOMContentLoaded', () => {
   const bgImageData = bgCtx.createImageData(256, 240);
   const spriteImageData = spriteCtx.createImageData(256, 240);
   const spriteBehindImageData = spriteBehindCtx.createImageData(256, 240);
+  
+  let lastFrameTime = 0;
+  const FRAME_THROTTLE = 16; // ~60fps max
 
   // ===== TILE MESH CACHE FOR PER-PIXEL EXTRUSION =====
   const tileMeshCache = new Map(); // key: `${tileIdx}_${palIdx}_${bgColorKey}` => geometry
@@ -152,7 +155,12 @@ window.addEventListener('DOMContentLoaded', () => {
     container.innerHTML = '';
     
     // Renderer setup
-    threeRenderer = new THREE.WebGLRenderer({ antialias: true });
+    threeRenderer = new THREE.WebGLRenderer({ 
+      antialias: true,
+      powerPreference: "high-performance",
+      stencil: false,
+      depth: true
+    });
     threeRenderer.setSize(window.innerWidth, window.innerHeight);
     container.appendChild(threeRenderer.domElement);
   
@@ -244,7 +252,7 @@ window.addEventListener('DOMContentLoaded', () => {
         console.error('VR support check failed:', error);
         buttonElement.style.opacity = '0.5';
         buttonElement.textContent = 'VR';
-        if (error.name === 'SecurityError') {
+        if (error.name === 'SecurityError') { 
           buttonElement.title = 'VR blocked by browser permissions';
           buttonElement.addEventListener('click', () => {
             alert('VR is blocked by browser permissions. Please allow VR access in your browser settings.');
@@ -1224,12 +1232,12 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // ===== MAIN RENDER LOOP =====
   function renderFrame(now) {
-    // Frame rate limiting
-    if (now - lastRenderTime < FRAME_TIME) {
+    if (now - lastRenderTime < FRAME_TIME || now - lastFrameTime < FRAME_THROTTLE) {
       requestAnimationFrame(renderFrame);
       return;
     }
     lastRenderTime = now;
+    lastFrameTime = now;
     
     if (nesFrameChanged) {
       drawLayeredCanvases(); // 2D canvas drawing
