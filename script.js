@@ -193,7 +193,7 @@ window.addEventListener('DOMContentLoaded', () => {
     // Camera setup
     threeCamera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
     // Place camera level with the NES screen, not above
-    threeCamera.position.set(0, 0, 12); // y=0 (level), z=12 (closer for stronger 3D effect)
+    threeCamera.position.set(0, 0, 18); // y=0 (level), z=18 (farther back for better view)
     threeCamera.lookAt(0, 0, 0);
 
     // Controls setup
@@ -418,6 +418,9 @@ window.addEventListener('DOMContentLoaded', () => {
       height: 100%;
       overflow: hidden;
       position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     `;
     
     const rightEye = document.createElement('div');
@@ -426,6 +429,9 @@ window.addEventListener('DOMContentLoaded', () => {
       height: 100%;
       overflow: hidden;
       position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     `;
     
     // Create separate renderers for each eye
@@ -433,14 +439,15 @@ window.addEventListener('DOMContentLoaded', () => {
       antialias: true,
       powerPreference: "high-performance"
     });
-    leftRenderer.setSize(window.innerWidth / 2, window.innerHeight);
+    // Set renderer size to full screen size (will be cropped by container)
+    leftRenderer.setSize(window.innerWidth, window.innerHeight);
     leftRenderer.setClearColor(0x0a0a0a);
     
     const rightRenderer = new THREE.WebGLRenderer({ 
       antialias: true,
       powerPreference: "high-performance"
     });
-    rightRenderer.setSize(window.innerWidth / 2, window.innerHeight);
+    rightRenderer.setSize(window.innerWidth, window.innerHeight);
     rightRenderer.setClearColor(0x0a0a0a);
     
     leftEye.appendChild(leftRenderer.domElement);
@@ -1309,7 +1316,6 @@ window.addEventListener('DOMContentLoaded', () => {
     threeScene.background = new THREE.Color(bgColorHex);
     update3DBackgroundTiles();
     create3DSpriteMeshes();
-    // Removed updateSpriteOverlayPlane() call since we now have individual sprite meshes
     threeRenderer.render(threeScene, threeCamera);
   }
 
@@ -1809,23 +1815,44 @@ function getSpriteColor(ppu, palIdx, colorIdx) {
       audioBufferR = [];
     }
   }
+  // Audio scheduling variables
+  let nextAudioTime = 0;
+  const SCHEDULE_AHEAD_TIME = 0.1; // 100ms lookahead
+  const AUDIO_BUFFER_INTERVAL = 0.025; // 25ms intervals
+  
   function playFallbackAudioBuffer() {
     if (!audioCtx) {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       console.log('Created fallback AudioContext');
     }
     if (isMuted) return;
+    
+    // Get current audio time
+    const currentTime = audioCtx.currentTime;
+    
+    // Schedule audio with proper timing
+    if (nextAudioTime < currentTime) {
+      nextAudioTime = currentTime;
+    }
+    
     const buffer = audioCtx.createBuffer(2, BUFFER_SIZE, audioCtx.sampleRate);
     // Convert samples to Float32 in [-1, 1]
     for (let i = 0; i < BUFFER_SIZE; i++) {
       buffer.getChannelData(0)[i] = audioBufferL[i] || 0;
       buffer.getChannelData(1)[i] = audioBufferR[i] || 0;
     }
+    
     const source = audioCtx.createBufferSource();
     source.buffer = buffer;
     source.connect(audioCtx.destination);
-    source.start();
-    console.log('Played fallback audio buffer');
+    
+    // Schedule the audio to play at the precise time
+    source.start(nextAudioTime);
+    
+    // Advance the next audio time
+    nextAudioTime += AUDIO_BUFFER_INTERVAL;
+    
+    console.log('Scheduled fallback audio buffer at:', nextAudioTime - AUDIO_BUFFER_INTERVAL);
   }
 
   // Debug: Log audio player creation and context state
@@ -1927,7 +1954,6 @@ function getSpriteColor(ppu, palIdx, colorIdx) {
   let bgPanelColorTimer = null;
   let bgPanelColorInterval = null;
   let tileRefreshTimer = null;
-  // Background panel removed - no longer needed
 
   // === NES START LOGIC REFACTOR ===
   function startNesEmulator() {
@@ -1947,11 +1973,20 @@ function getSpriteColor(ppu, palIdx, colorIdx) {
     if (!nesAudioPlayer && window.jsnes && jsnes.WebAudioPlayer) {
       nesAudioPlayer = new jsnes.WebAudioPlayer();
       debugAudioState('After creation: ');
+      
+      // Initialize audio timing for proper scheduling
+      if (nesAudioPlayer.ctx) {
+        nextAudioTime = nesAudioPlayer.ctx.currentTime;
+        console.log('Initialized audio timing at:', nextAudioTime);
+      }
     }
     // Resume audio context on user gesture (required by browsers)
     if (nesAudioPlayer && nesAudioPlayer.ctx && nesAudioPlayer.ctx.state !== 'running') {
       nesAudioPlayer.ctx.resume().then(() => {
         debugAudioState('After resume attempt: ');
+        // Reset timing when audio context resumes
+        nextAudioTime = nesAudioPlayer.ctx.currentTime;
+        console.log('Audio context resumed, timing reset to:', nextAudioTime);
         if (nesAudioPlayer.ctx.state !== 'running') {
           console.warn('Audio context is NOT running after resume!');
         }
@@ -2081,11 +2116,6 @@ function getSpriteColor(ppu, palIdx, colorIdx) {
 
   document.getElementById('startBtn').onclick = startNesEmulator;
 
-  // ===== TOGGLE BUTTON BEHAVIOR =====
-  // Removed toggle 3D button behavior
-
-  // ===== AUTO-SETUP THREE.JS =====
-  // Setup Three.js automatically since 3D is always active
   setupThreeJS();
 
   // Handle window resize for full-screen rendering
