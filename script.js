@@ -215,10 +215,12 @@ window.addEventListener('DOMContentLoaded', () => {
       // Check if WebXR is supported
       if (!navigator.xr) {
         console.log('WebXR not supported');
-        if (vrButton) {
-          vrButton.style.opacity = '0.5';
-          vrButton.title = 'VR not supported in this browser';
-        }
+        vrButton.style.opacity = '0.5';
+        vrButton.title = 'VR not supported in this browser';
+        vrButton.textContent = 'VR';
+        vrButton.addEventListener('click', () => {
+          alert('VR is not supported in this browser. Try using Chrome, Firefox, or Edge with WebXR support.');
+        });
         return;
       }
 
@@ -232,16 +234,25 @@ window.addEventListener('DOMContentLoaded', () => {
             console.log('VR not supported');
             vrButton.style.opacity = '0.5';
             vrButton.title = 'VR not supported on this device';
+            vrButton.textContent = 'VR';
+            vrButton.addEventListener('click', () => {
+              alert('VR is not supported on this device. You need a VR headset or VR-capable device.');
+            });
         }
       }).catch((error) => {
         console.error('VR support check failed:', error);
-        if (vrButton) {
-          vrButton.style.opacity = '0.5';
+        vrButton.style.opacity = '0.5';
+        vrButton.textContent = 'VR';
         if (error.name === 'SecurityError') {
           vrButton.title = 'VR blocked by browser permissions';
+          vrButton.addEventListener('click', () => {
+            alert('VR is blocked by browser permissions. Please allow VR access in your browser settings.');
+          });
         } else {
           vrButton.title = 'VR support check failed';
-        }
+          vrButton.addEventListener('click', () => {
+            alert('VR support check failed. Please try refreshing the page or using a different browser.');
+          });
         }
       });
       } catch (error) {
