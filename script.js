@@ -225,32 +225,33 @@ window.addEventListener('DOMContentLoaded', () => {
       }
 
       // Check if VR is available
+      const buttonElement = vrButtonElement; // Capture the button element locally
       navigator.xr.isSessionSupported('immersive-vr').then((supported) => {
         if (supported) {
-            vrButton.addEventListener('click', onVRButtonClick);
-            vrButton.title = 'Enter Virtual Reality Mode';
+            buttonElement.addEventListener('click', onVRButtonClick);
+            buttonElement.title = 'Enter Virtual Reality Mode';
             console.log('VR supported');
         } else {
             console.log('VR not supported');
-            vrButton.style.opacity = '0.5';
-            vrButton.title = 'VR not supported on this device';
-            vrButton.textContent = 'VR';
-            vrButton.addEventListener('click', () => {
+            buttonElement.style.opacity = '0.5';
+            buttonElement.title = 'VR not supported on this device';
+            buttonElement.textContent = 'VR';
+            buttonElement.addEventListener('click', () => {
               alert('VR is not supported on this device. You need a VR headset or VR-capable device.');
             });
         }
       }).catch((error) => {
         console.error('VR support check failed:', error);
-        vrButton.style.opacity = '0.5';
-        vrButton.textContent = 'VR';
+        buttonElement.style.opacity = '0.5';
+        buttonElement.textContent = 'VR';
         if (error.name === 'SecurityError') {
-          vrButton.title = 'VR blocked by browser permissions';
-          vrButton.addEventListener('click', () => {
+          buttonElement.title = 'VR blocked by browser permissions';
+          buttonElement.addEventListener('click', () => {
             alert('VR is blocked by browser permissions. Please allow VR access in your browser settings.');
           });
         } else {
-          vrButton.title = 'VR support check failed';
-          vrButton.addEventListener('click', () => {
+          buttonElement.title = 'VR support check failed';
+          buttonElement.addEventListener('click', () => {
             alert('VR support check failed. Please try refreshing the page or using a different browser.');
           });
         }
