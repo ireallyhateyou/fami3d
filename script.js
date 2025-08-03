@@ -31,14 +31,23 @@ window.addEventListener('DOMContentLoaded', () => {
   });
 
   // Setup VR after DOM elements are available
+  console.log('DOM loaded, setting up VR...');
+  console.log('Anaglyph button exists:', !!document.getElementById('anaglyphBtn'));
   setupVR();
   
-  // Disable VR button until game is loaded
-  const vrButtonElement = document.getElementById('vrBtn');
-  if (vrButtonElement) {
-    vrButtonElement.disabled = true;
-    vrButtonElement.title = 'Load a ROM first';
-  }
+      // Disable VR button until game is loaded
+    const vrButtonElement = document.getElementById('vrBtn');
+    if (vrButtonElement) {
+      vrButtonElement.disabled = true;
+      vrButtonElement.title = 'Load a ROM first';
+    }
+    
+    // Disable anaglyph button until game is loaded
+    const anaglyphButtonElement = document.getElementById('anaglyphBtn');
+    if (anaglyphButtonElement) {
+      anaglyphButtonElement.disabled = true;
+      anaglyphButtonElement.title = 'Load a ROM first';
+    }
 
   // === Library menu popup logic ===
   const menuBtn = document.getElementById('menuBtn');
@@ -66,11 +75,17 @@ window.addEventListener('DOMContentLoaded', () => {
         romData = arrayBufferToBinaryString(arrayBuffer); // Always use binary string for jsnes
         libraryModal.classList.remove('show');
         
-        // Enable VR button when ROM is loaded from library
         const vrButtonElement = document.getElementById('vrBtn');
         if (vrButtonElement) {
           vrButtonElement.disabled = false;
           vrButtonElement.title = 'Enter VR Mode';
+        }
+        
+        // Enable anaglyph button when ROM is loaded from library
+        const anaglyphButtonElement = document.getElementById('anaglyphBtn');
+        if (anaglyphButtonElement) {
+          anaglyphButtonElement.disabled = false;
+          anaglyphButtonElement.title = 'Enter Anaglyph 3D Mode (Red/Cyan Glasses)';
         }
         
         startNesEmulator();
@@ -130,6 +145,7 @@ window.addEventListener('DOMContentLoaded', () => {
   let splitScreenContainer = null;
   let splitScreenLeftRenderer = null;
   let splitScreenRightRenderer = null;
+  let splitScreenControls = null;
   
   // ===== ANAGLYPH 3D VARIABLES =====
   let isAnaglyphMode = false;
@@ -137,6 +153,7 @@ window.addEventListener('DOMContentLoaded', () => {
   let anaglyphRenderer = null;
   let anaglyphLeftCamera = null;
   let anaglyphRightCamera = null;
+  let anaglyphControls = null;
 
   // ===== PERFORMANCE OPTIMIZATIONS =====
   const colorCache = new Map();
@@ -234,6 +251,14 @@ window.addEventListener('DOMContentLoaded', () => {
   // ===== VR FUNCTIONS =====
   function setupVR() {
     try {
+      // Setup anaglyph button
+      const anaglyphButtonElement = document.getElementById('anaglyphBtn');
+      if (anaglyphButtonElement) {
+        anaglyphButtonElement.addEventListener('click', onAnaglyphButtonClick);
+        anaglyphButtonElement.title = 'Enter Anaglyph 3D Mode (Red/Cyan Glasses)';
+      }
+      
+      // Now setup VR button
       const vrButtonElement = document.getElementById('vrBtn');
       if (!vrButtonElement) {
         console.log('VR button not found');
@@ -253,9 +278,7 @@ window.addEventListener('DOMContentLoaded', () => {
         console.log('WebXR not supported, enabling split-screen mode');
         vrButton.title = 'Enter Split-Screen VR Mode';
         vrButton.textContent = 'VR';
-        vrButton.addEventListener('click', () => {
-          enterSplitScreenMode();
-        });
+        vrButton.addEventListener('click', onVRButtonClick);
         return;
       }
       
@@ -264,9 +287,7 @@ window.addEventListener('DOMContentLoaded', () => {
         console.log('WebXR blocked by HTTP protocol, enabling split-screen mode');
         vrButton.title = 'Enter Split-Screen VR Mode (HTTPS required for WebXR)';
         vrButton.textContent = 'VR';
-        vrButton.addEventListener('click', () => {
-          enterSplitScreenMode();
-        });
+        vrButton.addEventListener('click', onVRButtonClick);
         return;
       }
 
@@ -281,11 +302,9 @@ window.addEventListener('DOMContentLoaded', () => {
             console.log('VR not supported, enabling split-screen mode');
             buttonElement.title = 'Enter Split-Screen VR Mode';
             buttonElement.textContent = 'VR';
-            buttonElement.addEventListener('click', () => {
-              enterSplitScreenMode();
-            });
+            buttonElement.addEventListener('click', onVRButtonClick);
         }
-            }).catch((error) => {
+      }).catch((error) => {
         console.error('VR support check failed:', error);
         buttonElement.style.opacity = '0.5';
         buttonElement.textContent = 'VR';
@@ -293,14 +312,10 @@ window.addEventListener('DOMContentLoaded', () => {
         // Check if it's a security error (likely HTTP blocking WebXR)
         if (error.name === 'SecurityError' || error.name === 'NotAllowedError') {
           buttonElement.title = 'Enter Split-Screen VR Mode (HTTPS required for WebXR)';
-          buttonElement.addEventListener('click', () => {
-            enterSplitScreenMode();
-          });
+          buttonElement.addEventListener('click', onVRButtonClick);
         } else {
           buttonElement.title = 'Enter Split-Screen VR Mode';
-          buttonElement.addEventListener('click', () => {
-            enterSplitScreenMode();
-          });
+          buttonElement.addEventListener('click', onVRButtonClick);
         }
       });
       } catch (error) {
@@ -318,18 +333,25 @@ window.addEventListener('DOMContentLoaded', () => {
     if (isInVR) {
       exitVR();
     } else {
-      // Cycle through VR modes: WebXR -> Split-Screen -> Anaglyph
+      // Try WebXR first, fallback to split-screen
       if (navigator.xr && navigator.xr.isSessionSupported) {
-        enterVR(); // Try WebXR first
-      } else if (!isSplitScreenMode && !isAnaglyphMode) {
-        enterSplitScreenMode(); // Try split-screen second
-      } else if (isSplitScreenMode) {
-        exitSplitScreenMode();
-        enterAnaglyphMode(); // Try anaglyph third
+      enterVR();
       } else {
-        exitAnaglyphMode();
-        enterSplitScreenMode(); // Back to split-screen
+        enterSplitScreenMode();
       }
+    }
+  }
+  
+  function onAnaglyphButtonClick() {
+    if (!nes) {
+      alert('Please load a ROM first!');
+      return;
+    }
+    
+    if (isAnaglyphMode) {
+      exitAnaglyphMode();
+    } else {
+      enterAnaglyphMode();
     }
   }
 
@@ -400,102 +422,66 @@ window.addEventListener('DOMContentLoaded', () => {
     
     console.log('Entering Anaglyph 3D mode');
     isAnaglyphMode = true;
-    isInVR = true;
+    // Don't set isInVR = true as it interferes with normal game operation
     
-    // Get the VR button element safely
-    const vrButtonElement = document.getElementById('vrBtn');
-    if (vrButtonElement) {
-      vrButtonElement.classList.add('active');
-      vrButtonElement.textContent = 'Exit VR';
-      vrButtonElement.style.background = 'linear-gradient(45deg, #4CAF50, #45a049)';
+    console.log('Anaglyph: Creating renderer and cameras...');
+    
+    // Get the anaglyph button element safely
+    const anaglyphButtonElement = document.getElementById('anaglyphBtn');
+    if (anaglyphButtonElement) {
+      anaglyphButtonElement.classList.add('active');
+      anaglyphButtonElement.textContent = 'Take them off';
+      anaglyphButtonElement.style.background = 'linear-gradient(45deg, #4CAF50, #45a049)';
     }
     
-    // Create anaglyph container
-    anaglyphContainer = document.createElement('div');
-    anaglyphContainer.style.cssText = `
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100vw;
-      height: 100vh;
-      background: #000;
-      z-index: 1000;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    `;
+    // Use the existing Three.js renderer for anaglyph
+    anaglyphRenderer = threeRenderer;
     
-    // Create anaglyph canvas
-    const anaglyphCanvas = document.createElement('canvas');
-    anaglyphCanvas.width = 256;
-    anaglyphCanvas.height = 240;
-    anaglyphCanvas.style.cssText = `
-      max-width: 90vw;
-      max-height: 90vh;
-      width: auto;
-      height: auto;
-      image-rendering: pixelated;
-    `;
+    // Create cameras for anaglyph 3D with dramatic separation
+    console.log('Anaglyph: Creating cameras...');
+    anaglyphLeftCamera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 1000); // Match normal camera FOV
+    anaglyphRightCamera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 1000); // Match normal camera FOV
     
-    // Create anaglyph renderer
-    anaglyphRenderer = new THREE.WebGLRenderer({ 
-      antialias: true,
-      powerPreference: "high-performance"
-    });
-    anaglyphRenderer.setSize(256, 240);
-    anaglyphRenderer.setClearColor(0x0a0a0a);
+    // Much stronger separation for more dramatic anaglyph effect
+    const ipd = 0.3; // Reduced from 0.6 back to 0.3 for more comfortable viewing
+    anaglyphLeftCamera.position.set(-ipd/2, 0, 18); // Same z distance as normal camera
+    anaglyphRightCamera.position.set(ipd/2, 0, 18); // Same z distance as normal camera
     
-    anaglyphContainer.appendChild(anaglyphCanvas);
-    document.body.appendChild(anaglyphContainer);
-    
-    // Create cameras for anaglyph 3D
-    anaglyphLeftCamera = threeCamera.clone();
-    anaglyphRightCamera = threeCamera.clone();
-    
-    // Enhanced IPD for anaglyph effect
-    const ipd = 0.15; // Stronger separation for anaglyph
-    anaglyphLeftCamera.position.x -= ipd / 2;
-    anaglyphRightCamera.position.x += ipd / 2;
+    anaglyphLeftCamera.lookAt(0, 0, 0);
+    anaglyphRightCamera.lookAt(0, 0, 0);
     
     // Update projection matrices
     anaglyphLeftCamera.updateProjectionMatrix();
     anaglyphRightCamera.updateProjectionMatrix();
+    console.log('Anaglyph: Cameras positioned and matrices updated');
     
-    // Add click to exit
-    anaglyphContainer.addEventListener('click', () => {
-      exitAnaglyphMode();
+    // Add camera controls for anaglyph mode
+    anaglyphControls = new THREE.OrbitControls(anaglyphLeftCamera, threeRenderer.domElement);
+    anaglyphControls.enableDamping = true;
+    anaglyphControls.dampingFactor = 0.05;
+    anaglyphControls.screenSpacePanning = false;
+    anaglyphControls.minDistance = 14;
+    anaglyphControls.maxDistance = 22;
+    anaglyphControls.minPolarAngle = Math.PI / 2 - 0.3;
+    anaglyphControls.maxPolarAngle = Math.PI / 2 + 0.3;
+    anaglyphControls.minAzimuthAngle = -Math.PI / 4;
+    anaglyphControls.maxAzimuthAngle = Math.PI / 4;
+    
+    // Sync right camera with left camera movement
+    anaglyphControls.addEventListener('change', () => {
+      // Copy position and rotation from left camera to right camera
+      anaglyphRightCamera.position.copy(anaglyphLeftCamera.position);
+      anaglyphRightCamera.position.x += ipd; // Maintain stereoscopic separation
+      anaglyphRightCamera.rotation.copy(anaglyphLeftCamera.rotation);
+      anaglyphRightCamera.updateMatrixWorld();
     });
     
-    // Start anaglyph render loop
-    function renderAnaglyph() {
-      if (!isAnaglyphMode) return;
-      
-      // Update scene if needed
-      if (nesFrameChanged) {
-        updateThreeScene();
-        nesFrameChanged = false;
-      }
-      
-      // Render left eye (red channel)
-      anaglyphRenderer.setClearColor(0x000000);
-      anaglyphRenderer.clear();
-      
-      // Set color mask for red channel only
-      anaglyphRenderer.state.buffers.color.setMask(true, false, false, true);
-      anaglyphRenderer.render(threeScene, anaglyphLeftCamera);
-      
-      // Set color mask for cyan channel (green + blue)
-      anaglyphRenderer.state.buffers.color.setMask(false, true, true, true);
-      anaglyphRenderer.render(threeScene, anaglyphRightCamera);
-      
-      // Reset color mask
-      anaglyphRenderer.state.buffers.color.setMask(true, true, true, true);
-      
-      requestAnimationFrame(renderAnaglyph);
-    }
+    // Use the existing 3D scene for anaglyph rendering
+    console.log('Anaglyph: Using existing 3D scene for rendering');
     
-    renderAnaglyph();
-    console.log('Anaglyph 3D mode active - wear red/cyan glasses!');
+    console.log('Anaglyph 3D mode active - wear red/cyan glasses! Use mouse to move camera.');
+    
+    // Don't set animation loop - let the main render loop handle it
   }
   
   function exitAnaglyphMode() {
@@ -503,21 +489,26 @@ window.addEventListener('DOMContentLoaded', () => {
     
     console.log('Exiting Anaglyph 3D mode');
     isAnaglyphMode = false;
-    isInVR = false;
     
-    // Get the VR button element safely
-    const vrButtonElement = document.getElementById('vrBtn');
-    if (vrButtonElement) {
-      vrButtonElement.classList.remove('active');
-      vrButtonElement.textContent = 'VR';
-      vrButtonElement.style.background = '';
+    // Clean up controls
+    if (anaglyphControls) {
+      anaglyphControls.dispose();
+      anaglyphControls = null;
     }
     
-    // Remove anaglyph container
-    if (anaglyphContainer) {
-      document.body.removeChild(anaglyphContainer);
-      anaglyphContainer = null;
+    // Get the anaglyph button element safely
+    const anaglyphButtonElement = document.getElementById('anaglyphBtn');
+    if (anaglyphButtonElement) {
+      anaglyphButtonElement.classList.remove('active');
+      anaglyphButtonElement.textContent = 'Use Glasses';
+      anaglyphButtonElement.style.background = '';
     }
+    
+    // Clean up cameras
+    anaglyphLeftCamera = null;
+    anaglyphRightCamera = null;
+    
+    console.log('Exited Anaglyph 3D mode');
   }
   
   // ===== SPLIT-SCREEN VR FUNCTIONS =====
@@ -545,9 +536,10 @@ window.addEventListener('DOMContentLoaded', () => {
       width: 100vw;
       height: 100vh;
       background: #000;
-      z-index: 1000;
+      z-index: 50;
       display: flex;
       flex-direction: row;
+      pointer-events: none;
     `;
     
     // Create left and right eye views (side by side - like Google Cardboard)
@@ -560,6 +552,7 @@ window.addEventListener('DOMContentLoaded', () => {
       display: flex;
       align-items: center;
       justify-content: center;
+      pointer-events: auto;
     `;
     
     const rightEye = document.createElement('div');
@@ -571,6 +564,7 @@ window.addEventListener('DOMContentLoaded', () => {
       display: flex;
       align-items: center;
       justify-content: center;
+      pointer-events: auto;
     `;
     
     // Create separate renderers for each eye
@@ -594,7 +588,7 @@ window.addEventListener('DOMContentLoaded', () => {
     
     splitScreenContainer.appendChild(leftEye);
     splitScreenContainer.appendChild(rightEye);
-    document.body.appendChild(splitScreenContainer);
+    document.getElementById('threejs-container').appendChild(splitScreenContainer);
     
     // Create cameras with proper stereoscopic offset for strong 3D effect
     splitScreenLeftCamera = threeCamera.clone();
@@ -617,32 +611,89 @@ window.addEventListener('DOMContentLoaded', () => {
     splitScreenLeftCamera.updateProjectionMatrix();
     splitScreenRightCamera.updateProjectionMatrix();
     
+    // Add camera controls for split-screen mode
+    splitScreenControls = new THREE.OrbitControls(splitScreenLeftCamera, splitScreenLeftRenderer.domElement);
+    splitScreenControls.enableDamping = true;
+    splitScreenControls.dampingFactor = 0.05;
+    splitScreenControls.screenSpacePanning = false;
+    splitScreenControls.minDistance = 14;
+    splitScreenControls.maxDistance = 22;
+    splitScreenControls.minPolarAngle = Math.PI / 2 - 0.3;
+    splitScreenControls.maxPolarAngle = Math.PI / 2 + 0.3;
+    splitScreenControls.minAzimuthAngle = -Math.PI / 4;
+    splitScreenControls.maxAzimuthAngle = Math.PI / 4;
+    
+    // Sync right camera with left camera movement
+    splitScreenControls.addEventListener('change', () => {
+      // Copy position and rotation from left camera to right camera
+      splitScreenRightCamera.position.copy(splitScreenLeftCamera.position);
+      splitScreenRightCamera.position.x += ipd; // Maintain stereoscopic separation
+      splitScreenRightCamera.rotation.copy(splitScreenLeftCamera.rotation);
+      splitScreenRightCamera.updateMatrixWorld();
+    });
+    
     // Add click to exit
-    splitScreenContainer.addEventListener('click', () => {
+    splitScreenContainer.addEventListener('click', (e) => {
+      // Don't exit if clicking on the renderer (for camera controls)
+      if (e.target === splitScreenLeftRenderer.domElement || e.target === splitScreenRightRenderer.domElement) {
+        return;
+      }
       exitSplitScreenMode();
     });
+    
+
     
     // Start split-screen render loop
     function renderSplitScreen() {
       if (!isSplitScreenMode) return;
       
+      // Update controls
+      if (splitScreenControls) {
+        splitScreenControls.update();
+      }
+      
       // Update scene if needed
       if (nesFrameChanged) {
-        updateThreeScene();
+        console.log('Split-screen: Updating scene, nesFrameChanged =', nesFrameChanged);
+        updateThreeScene(); // 3D from canvas pixels (always update when in VR modes)
         nesFrameChanged = false;
       }
       
+      // Force scene update for split-screen renderers
+      if (threeScene) {
+        // Update all objects in the scene
+        threeScene.traverse((object) => {
+          if (object.matrixAutoUpdate) {
+            object.updateMatrix();
+          }
+        });
+      }
+      
       // Render left eye
-      splitScreenLeftRenderer.render(threeScene, splitScreenLeftCamera);
+      if (splitScreenLeftRenderer && splitScreenLeftCamera) {
+        splitScreenLeftRenderer.render(threeScene, splitScreenLeftCamera);
+      } else {
+        console.error('Split-screen: Missing renderer or camera', {
+          leftRenderer: !!splitScreenLeftRenderer,
+          leftCamera: !!splitScreenLeftCamera
+        });
+      }
       
       // Render right eye
-      splitScreenRightRenderer.render(threeScene, splitScreenRightCamera);
+      if (splitScreenRightRenderer && splitScreenRightCamera) {
+        splitScreenRightRenderer.render(threeScene, splitScreenRightCamera);
+      } else {
+        console.error('Split-screen: Missing renderer or camera', {
+          rightRenderer: !!splitScreenRightRenderer,
+          rightCamera: !!splitScreenRightCamera
+        });
+      }
       
       requestAnimationFrame(renderSplitScreen);
     }
     
     renderSplitScreen();
-    console.log('Split-Screen VR mode active');
+    console.log('Split-Screen VR mode active - use mouse to move camera');
   }
   
   function exitSplitScreenMode() {
@@ -660,9 +711,15 @@ window.addEventListener('DOMContentLoaded', () => {
       vrButtonElement.style.background = '';
     }
     
+    // Clean up controls
+    if (splitScreenControls) {
+      splitScreenControls.dispose();
+      splitScreenControls = null;
+    }
+    
     // Remove split-screen container
     if (splitScreenContainer) {
-      document.body.removeChild(splitScreenContainer);
+      document.getElementById('threejs-container').removeChild(splitScreenContainer);
       splitScreenContainer = null;
     }
     
@@ -853,7 +910,7 @@ window.addEventListener('DOMContentLoaded', () => {
           } else {
             nes.buttonUp(1, 3);
           }
-          
+
           // Handle thumbstick for D-pad movement
           if (gamepad.axes && gamepad.axes.length >= 2) {
             const xAxis = gamepad.axes[0]; // Left/Right
@@ -941,7 +998,7 @@ window.addEventListener('DOMContentLoaded', () => {
         );
         if (imgData[idx + 3] > 0 && dist > 8) {
           // Enhanced voxel depth for stronger 3D stereoscopic effect
-          const voxelDepth = 0.5; // Increased depth for more pronounced 3D effect
+          const voxelDepth = 0.5; // Reduced from 1.0 back to 0.5 for more comfortable viewing
           // Offset by an extra 0.03 units farther back
           const box = new THREE.BoxGeometry(0.0625, 0.0625, voxelDepth);
           box.translate((px - 4) * 0.0625 + 0.03125, (3.5 - py) * 0.0625 + 0.03125, 1.01 - voxelDepth/2 - 0.03);
@@ -1354,7 +1411,7 @@ window.addEventListener('DOMContentLoaded', () => {
             if (dist > 8) {
               // Create voxel for this pixel with enhanced depth for stronger 3D stereoscopic effect
               const voxelSize = 1 / 16; // Scale to NES coordinate system
-              const box = new THREE.BoxGeometry(voxelSize, voxelSize, 0.5); // Increased depth for more pronounced 3D effect
+              const box = new THREE.BoxGeometry(voxelSize, voxelSize, 0.5); // Reduced from 1.0 back to 0.5 for more comfortable viewing
               box.translate(
                 (px - spriteSize/2) * voxelSize + voxelSize/2,
                 (spriteSize/2 - py) * voxelSize + voxelSize/2,
@@ -1460,7 +1517,11 @@ window.addEventListener('DOMContentLoaded', () => {
     threeScene.background = new THREE.Color(bgColorHex);
     update3DBackgroundTiles();
     create3DSpriteMeshes();
-    threeRenderer.render(threeScene, threeCamera);
+    
+    // Only render normally if not in anaglyph mode (anaglyph has its own render loop)
+    if (!isAnaglyphMode) {
+      threeRenderer.render(threeScene, threeCamera);
+    }
   }
 
   // ===== TILE DIRTY HASHES FOR OPTIMIZATION =====
@@ -1629,10 +1690,36 @@ window.addEventListener('DOMContentLoaded', () => {
     
     if (nesFrameChanged) {
       drawLayeredCanvases(); // 2D canvas drawing
-      if (use3D && !isInVR) {
-        updateThreeScene(); // 3D from canvas pixels (only when not in VR)
+      if (use3D && (!isInVR || isSplitScreenMode)) {
+        updateThreeScene(); // 3D from canvas pixels (always update when in VR modes)
       }
       nesFrameChanged = false;
+    }
+    
+    // Handle anaglyph mode rendering
+    if (isAnaglyphMode && use3D) {
+      updateThreeScene(); // Update 3D scene for anaglyph
+      
+      // Update anaglyph controls
+      if (anaglyphControls) {
+        anaglyphControls.update();
+      }
+      
+      // Render with anaglyph effect
+      if (anaglyphLeftCamera && anaglyphRightCamera) {
+        const gl = threeRenderer.getContext();
+        
+        // Render left eye (red channel only)
+        gl.colorMask(true, false, false, true);
+        threeRenderer.render(threeScene, anaglyphLeftCamera);
+        
+        // Render right eye (cyan channel - green + blue)
+        gl.colorMask(false, true, true, true);
+        threeRenderer.render(threeScene, anaglyphRightCamera);
+        
+        // Reset color mask
+        gl.colorMask(true, true, true, true);
+      }
     }
     
     requestAnimationFrame(renderFrame);
@@ -1716,8 +1803,6 @@ window.addEventListener('DOMContentLoaded', () => {
             data[index + 1] = rgb[1]; // G
             data[index + 2] = rgb[2]; // B
             data[index + 3] = 255;    // A
-            
-
           }
         }
       }
@@ -1907,17 +1992,17 @@ window.addEventListener('DOMContentLoaded', () => {
     return result;
   }
 
-function swapRB(color) {
-  color = color & 0xFFFFFF;
-  const r = (color >> 16) & 0xFF;
-  const g = (color >> 8) & 0xFF;
-  const b = color & 0xFF;
-  return (b << 16) | (g << 8) | r;
-}
+  function swapRB(color) {
+    color = color & 0xFFFFFF;
+    const r = (color >> 16) & 0xFF;
+    const g = (color >> 8) & 0xFF;
+    const b = color & 0xFF;
+    return (b << 16) | (g << 8) | r;
+  }
 
-function getSpriteColor(ppu, palIdx, colorIdx) {
-  const paletteAddr = 0x3F10 + palIdx * 4 + colorIdx;
-  const nesColorIdx = ppu.vramMem ? ppu.vramMem[paletteAddr & 0x3F1F] : 0;
+  function getSpriteColor(ppu, palIdx, colorIdx) {
+    const paletteAddr = 0x3F10 + palIdx * 4 + colorIdx;
+    const nesColorIdx = ppu.vramMem ? ppu.vramMem[paletteAddr & 0x3F1F] : 0;
     return fbxPalette[nesColorIdx % 64] || [136, 136, 136];
   }
 
@@ -1931,12 +2016,19 @@ function getSpriteColor(ppu, palIdx, colorIdx) {
       romData = event.target.result;
       document.getElementById('startBtn').disabled = false;
       
-      // Enable VR button when ROM is loaded
-      const vrButtonElement = document.getElementById('vrBtn');
-      if (vrButtonElement) {
-        vrButtonElement.disabled = false;
-        vrButtonElement.title = 'Enter VR Mode';
-      }
+          // Enable VR button when ROM is loaded
+    const vrButtonElement = document.getElementById('vrBtn');
+    if (vrButtonElement) {
+      vrButtonElement.disabled = false;
+      vrButtonElement.title = 'Enter VR Mode';
+    }
+    
+    // Enable anaglyph button when ROM is loaded
+    const anaglyphButtonElement = document.getElementById('anaglyphBtn');
+    if (anaglyphButtonElement) {
+      anaglyphButtonElement.disabled = false;
+      anaglyphButtonElement.title = 'Enter Anaglyph 3D Mode (Red/Cyan Glasses)';
+    }
     };
     reader.readAsBinaryString(file);
   });
@@ -1996,7 +2088,7 @@ function getSpriteColor(ppu, palIdx, colorIdx) {
     // Advance the next audio time
     nextAudioTime += AUDIO_BUFFER_INTERVAL;
     
-    console.log('Scheduled fallback audio buffer at:', nextAudioTime - AUDIO_BUFFER_INTERVAL);
+    // console.log('Scheduled fallback audio buffer at:', nextAudioTime - AUDIO_BUFFER_INTERVAL);
   }
 
   // Debug: Log audio player creation and context state
@@ -2205,7 +2297,7 @@ function getSpriteColor(ppu, palIdx, colorIdx) {
       audio: nesAudioPlayer,
       onAudioSample: (!nesAudioPlayer ? function(left, right) {
         fallbackOnAudioSample(left, right);
-        if (Math.random() < 0.001) console.log('onAudioSample called:', left, right);
+        // if (Math.random() < 0.001) console.log('onAudioSample called:', left, right);
       } : null)
     });
     window.nes = nes;

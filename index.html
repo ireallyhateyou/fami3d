@@ -18,7 +18,7 @@
       position: absolute;
       top: 10px;
       left: 10px;
-      z-index: 100;
+      z-index: 1000;
       background: rgba(0,0,0,0.8);
       padding: 15px;
       border-radius: 8px;
@@ -84,6 +84,25 @@
       border-color: rgba(255,255,255,0.4);
     }
     #vrBtn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      background: rgba(255,255,255,0.05);
+      border-color: rgba(255,255,255,0.1);
+    }
+    #anaglyphBtn {
+      /* Match the other buttons */
+      background: rgba(255,255,255,0.1);
+      border-color: rgba(255,255,255,0.2);
+    }
+    #anaglyphBtn:hover {
+      background: rgba(255,255,255,0.2);
+      border-color: rgba(255,255,255,0.3);
+    }
+    #anaglyphBtn.active {
+      background: rgba(255,255,255,0.3);
+      border-color: rgba(255,255,255,0.4);
+    }
+    #anaglyphBtn:disabled {
       opacity: 0.5;
       cursor: not-allowed;
       background: rgba(255,255,255,0.05);
@@ -256,6 +275,7 @@
       <button id="menuBtn" title="Menu">☰</button>
       <button id="muteBtn" title="Mute">🔊</button>
       <button id="vrBtn" title="Enter VR">VR</button>
+      <button id="anaglyphBtn" title="Enter Anaglyph 3D" disabled>Use Glasses</button>
     </div>
     <div class="controls-row">
       <input type="file" id="romfile" accept=".nes" />
@@ -281,9 +301,8 @@
             <li><strong>X / S:</strong> B button (Run/Fire)</li>
             <li><strong>Enter:</strong> Start button</li>
             <li><strong>Shift:</strong> Select button</li>
-            <li><strong>VR Mode:</strong> Click VR button to cycle through VR modes</li>
-            <li><strong>VR Modes:</strong> WebXR → Split-Screen → Anaglyph 3D</li>
-            <li><strong>Anaglyph 3D:</strong> Wear red/cyan glasses for classic 3D!</li>
+            <li><strong>VR Mode:</strong> Click VR button for WebXR or Split-Screen</li>
+            <li><strong>Anaglyph 3D:</strong> Click "Use Glasses" button for red/cyan 3D!</li>
             <li><strong>VR Controls:</strong> Use VR controller buttons and thumbstick</li>
           </ul>
         </div>
