@@ -71,7 +71,6 @@
       line-height: 1;
     }
     #vrBtn {
-      /* Match the other buttons */
       background: rgba(255,255,255,0.1);
       border-color: rgba(255,255,255,0.2);
     }
@@ -90,7 +89,6 @@
       border-color: rgba(255,255,255,0.1);
     }
     #anaglyphBtn {
-      /* Match the other buttons */
       background: rgba(255,255,255,0.1);
       border-color: rgba(255,255,255,0.2);
     }
@@ -136,7 +134,7 @@
       margin: 20px auto;
       display: flex;
       gap: 10px;
-      visibility: hidden; /* Completely hide the canvas container */
+      visibility: hidden; 
     }
     canvas {
       position: relative;
@@ -275,7 +273,7 @@
       <button id="menuBtn" title="Menu">☰</button>
       <button id="muteBtn" title="Mute">🔊</button>
       <button id="vrBtn" title="Enter VR">VR</button>
-      <button id="anaglyphBtn" title="Enter Anaglyph 3D" disabled>Use Glasses</button>
+      <button id="anaglyphBtn" title="Enter Anaglyph 3D" disabled>Anaglyph Mode</button>
     </div>
     <div class="controls-row">
       <input type="file" id="romfile" accept=".nes" />
@@ -302,7 +300,7 @@
             <li><strong>Enter:</strong> Start button</li>
             <li><strong>Shift:</strong> Select button</li>
             <li><strong>VR Mode:</strong> Click VR button for WebXR or Split-Screen</li>
-            <li><strong>Anaglyph 3D:</strong> Click "Use Glasses" button for red/cyan 3D!</li>
+            <li><strong>Anaglyph 3D:</strong> Click "Anaglyph Mode" button for red/cyan 3D!</li>
             <li><strong>VR Controls:</strong> Use VR controller buttons and thumbstick</li>
           </ul>
         </div>

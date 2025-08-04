@@ -1,10 +1,7 @@
 window.addEventListener('DOMContentLoaded', () => {
-  // Help button functionality
   const helpBtn = document.getElementById('helpBtn');
   const helpModal = document.getElementById('helpModal');
   const closeHelpModal = document.getElementById('closeHelpModal');
-  
-  console.log('Help elements found:', { helpBtn, helpModal, closeHelpModal });
   
   helpBtn.addEventListener('click', () => {
     helpModal.classList.add('show');
@@ -35,19 +32,19 @@ window.addEventListener('DOMContentLoaded', () => {
   console.log('Anaglyph button exists:', !!document.getElementById('anaglyphBtn'));
   setupVR();
   
-      // Disable VR button until game is loaded
-    const vrButtonElement = document.getElementById('vrBtn');
-    if (vrButtonElement) {
-      vrButtonElement.disabled = true;
-      vrButtonElement.title = 'Load a ROM first';
-    }
-    
-    // Disable anaglyph button until game is loaded
-    const anaglyphButtonElement = document.getElementById('anaglyphBtn');
-    if (anaglyphButtonElement) {
-      anaglyphButtonElement.disabled = true;
-      anaglyphButtonElement.title = 'Load a ROM first';
-    }
+  // Disable VR button until game is loaded
+  const vrButtonElement = document.getElementById('vrBtn');
+  if (vrButtonElement) {
+    vrButtonElement.disabled = true;
+    vrButtonElement.title = 'Load a ROM first';
+  }
+  
+  // Disable anaglyph button until game is loaded
+  const anaglyphButtonElement = document.getElementById('anaglyphBtn');
+  if (anaglyphButtonElement) {
+    anaglyphButtonElement.disabled = true;
+    anaglyphButtonElement.title = 'Load a ROM first';
+  }
 
   // === Library menu popup logic ===
   const menuBtn = document.getElementById('menuBtn');
@@ -59,10 +56,12 @@ window.addEventListener('DOMContentLoaded', () => {
   closeLibraryModal.addEventListener('click', () => {
     libraryModal.classList.remove('show');
   });
+  
   // Clicking outside the modal closes it
   libraryModal.addEventListener('click', (e) => {
     if (e.target === libraryModal) libraryModal.classList.remove('show');
   });
+
   // ROM library buttons
   document.querySelectorAll('.rom-library-btn').forEach(btn => {
     btn.addEventListener('click', async function() {
@@ -106,8 +105,8 @@ window.addEventListener('DOMContentLoaded', () => {
   const spriteBehindCtx = spriteBehindCanvas.getContext('2d', { willReadFrequently: true });
 
   const nesCanvas = document.createElement('canvas');
-    nesCanvas.width = 256; 
-    nesCanvas.height = 240;
+  nesCanvas.width = 256; 
+  nesCanvas.height = 240;
   const ctx = nesCanvas.getContext('2d');
   const imageData = ctx.getImageData(0, 0, 256, 240);
 
@@ -500,7 +499,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const anaglyphButtonElement = document.getElementById('anaglyphBtn');
     if (anaglyphButtonElement) {
       anaglyphButtonElement.classList.remove('active');
-      anaglyphButtonElement.textContent = 'Use Glasses';
+      anaglyphButtonElement.textContent = 'Anaglyph Mode';
       anaglyphButtonElement.style.background = '';
     }
     
@@ -956,7 +955,7 @@ window.addEventListener('DOMContentLoaded', () => {
       if (inputSource.handedness === 'left') {
         if (inputSource.gamepad) {
           const gamepad = inputSource.gamepad;
-          
+
           // Use left controller for menu navigation
           if (gamepad.buttons[0] && gamepad.buttons[0].pressed) {
             // Quick pause/unpause
@@ -2016,19 +2015,19 @@ window.addEventListener('DOMContentLoaded', () => {
       romData = event.target.result;
       document.getElementById('startBtn').disabled = false;
       
-          // Enable VR button when ROM is loaded
-    const vrButtonElement = document.getElementById('vrBtn');
-    if (vrButtonElement) {
-      vrButtonElement.disabled = false;
-      vrButtonElement.title = 'Enter VR Mode';
-    }
-    
-    // Enable anaglyph button when ROM is loaded
-    const anaglyphButtonElement = document.getElementById('anaglyphBtn');
-    if (anaglyphButtonElement) {
-      anaglyphButtonElement.disabled = false;
-      anaglyphButtonElement.title = 'Enter Anaglyph 3D Mode (Red/Cyan Glasses)';
-    }
+      // Enable VR button when ROM is loaded
+      const vrButtonElement = document.getElementById('vrBtn');
+      if (vrButtonElement) {
+        vrButtonElement.disabled = false;
+        vrButtonElement.title = 'Enter VR Mode';
+      }
+      
+      // Enable anaglyph button when ROM is loaded
+      const anaglyphButtonElement = document.getElementById('anaglyphBtn');
+      if (anaglyphButtonElement) {
+        anaglyphButtonElement.disabled = false;
+        anaglyphButtonElement.title = 'Enter Anaglyph 3D Mode (Red/Cyan Glasses)';
+      }
     };
     reader.readAsBinaryString(file);
   });
