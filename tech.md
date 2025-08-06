@@ -36,9 +36,9 @@ By reading data from the PPU directly from jsnes, we can render three canvases:
 3. Priority-one sprites
 
 Using Three.js, we can position these layers in 3D space:
-- `y = -1` for sprites behind the background
-- `y = 0` for background tiles
-- `y = +1` for sprites in front
+- `z = -0.1` for priority-1 sprites (behind the background)
+- `z = 0` for background tiles
+- `z = 1` for priority-0 sprites (in front)
 
 This allows us to have (albeit very shoddy and unimpressive) 3D rendering for the NES (more like a floating 2.5D diorama). We can go further by filtering the background color (i.e., the sky) from other background tiles (bricks, pipes, etc.) and applying it to the entire 3D scene.
 

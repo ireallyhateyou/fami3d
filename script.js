@@ -1110,7 +1110,7 @@ window.addEventListener('DOMContentLoaded', () => {
         const mesh = new THREE.Mesh();
         mesh.position.x = (tx - 31/2) * 0.5;
         mesh.position.y = (29/2 - ty) * 0.5;
-        mesh.position.z = 0.5;
+        mesh.position.z = 0; // Background tiles at x=0
         mesh.visible = false;
         threeScene.add(mesh);
         bgTileMeshes[ty][tx] = mesh;
@@ -1408,13 +1408,13 @@ window.addEventListener('DOMContentLoaded', () => {
             );
             
             if (dist > 8) {
-              // Create voxel for this pixel with enhanced depth for stronger 3D stereoscopic effect
+              // Create voxel for this pixel with depth for better overlay effect
               const voxelSize = 1 / 16; // Scale to NES coordinate system
-              const box = new THREE.BoxGeometry(voxelSize, voxelSize, 0.5); // Reduced from 1.0 back to 0.5 for more comfortable viewing
+              const box = new THREE.BoxGeometry(voxelSize, voxelSize, 0.3); // Reduced depth for better overlay
               box.translate(
                 (px - spriteSize/2) * voxelSize + voxelSize/2,
                 (spriteSize/2 - py) * voxelSize + voxelSize/2,
-                0.15 // Reduced from 0.4 to 0.15 to center the voxel
+                0.05 // Centered at smaller depth
               );
               geometries.push(box);
               hasVoxel = true;
@@ -1429,10 +1429,10 @@ window.addEventListener('DOMContentLoaded', () => {
       const mergedGeometry = THREE.BufferGeometryUtils.mergeBufferGeometries(geometries);
       const mesh = new THREE.Mesh(mergedGeometry, mat);
       
-      // Position sprite correctly in 3D space - much higher on Z-axis
+      // Position sprite correctly in 3D space - using x-axis for layering
       mesh.position.x = (sx - 128 + spriteSize / 2) / 16;
       mesh.position.y = (120 - sy - spriteSize / 2) / 15;
-      mesh.position.z = priority === 1 ? 3.0 : 3.5; // Much higher Z position to be above everything
+      mesh.position.z = priority === 1 ? -0.1 : 0.85; // Priority 1 behind background, Priority 0 in front // Much higher Z position to be above everything
       
       // Create overlay plane for detailed sprite texture
       const overlayTexture = new THREE.CanvasTexture(spriteCanvas);
@@ -1449,7 +1449,7 @@ window.addEventListener('DOMContentLoaded', () => {
         new THREE.PlaneGeometry(spriteSize / 16, spriteSize / 15), 
         overlayMat
       );
-      overlayPlane.position.z = 0.31; // Slightly in front of the voxel geometry to ensure it's visible
+      overlayPlane.position.z = 0.21; // On the front surface of the voxel geometry
       mesh.add(overlayPlane);
       
       threeScene.add(mesh);
@@ -2105,7 +2105,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const muteBtn = document.getElementById('muteBtn');
     console.log('Mute toggled. isMuted:', isMuted);
     if (isMuted) {
-      muteBtn.textContent = '🔇';
+      muteBtn.innerHTML = '<img src="assets/muted.png" alt="Muted" width="16" height="16">';
       muteBtn.title = 'Unmute';
       // Mute the audio context
       if (nesAudioPlayer && nesAudioPlayer.ctx) {
@@ -2113,7 +2113,7 @@ window.addEventListener('DOMContentLoaded', () => {
         debugAudioState('After mute: ');
       }
     } else {
-      muteBtn.textContent = '🔊';
+      muteBtn.innerHTML = '<img src="assets/speaker.png" alt="Speaker" width="16" height="16">';
       muteBtn.title = 'Mute';
       // Unmute the audio context
       if (nesAudioPlayer && nesAudioPlayer.ctx) {
