@@ -5,7 +5,6 @@ Feel free to try the demo [here](https://ireallyhateyou.github.io/fami3d/)!
 ![demo](https://i.imgur.com/IytUMey.png)
 
 ## What?
-
 This project seeks to transform a traditional 2D NES emulator into an interactive 3D experience by using real-time 3D conversion. This runs purely on the browser in JavaScript using Three.js and jsnes.
 
 The result is a fully playable NES game that can be viewed and interacted with in 3D-space.
@@ -15,6 +14,7 @@ It makes for a cool and interesting technical demo by mixing retro and new, tryi
 
 This can also be interesting for augmented reality consoles like the Meta Quest. This is also for a hackathon for K-12 students (iykyk).
 
+This has also been done before, with [3DSen VR](https://geod.itch.io/3dnes) and [3DNES](https://archive.org/details/thc-3dnes) (which has become vaporware). But I aspired to make a project that is heuristic (works with every game without a pre-set table), and in JavaScript for extra challenge.
 
 ## How?
 ### NES picture rendering

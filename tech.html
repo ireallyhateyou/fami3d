@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Adding 3D Visualization to a Web NES Emulator
+  </title>
+  <style>
+    body { 
+      background: #222; 
+      color: #fff; 
+      font-family: sans-serif; 
+      margin: 0;
+      padding: 0;
+      line-height: 1.6;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 40px 20px;
+    }
+    h1 {
+      color: #fff;
+      font-size: 2.5em;
+      margin-bottom: 0.5em;
+      text-align: center;
+    }
+    h2 {
+      color: #fff;
+      font-size: 1.8em;
+      margin-top: 2em;
+      margin-bottom: 0.8em;
+      border-bottom: 2px solid rgba(255,255,255,0.2);
+      padding-bottom: 0.3em;
+    }
+    h3 {
+      color: #fff;
+      font-size: 1.4em;
+      margin-top: 1.5em;
+      margin-bottom: 0.6em;
+    }
+    p {
+      color: #ccc;
+      margin-bottom: 1em;
+      font-size: 1.1em;
+    }
+    img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 8px;
+      margin: 20px 0;
+      display: block;
+      margin-left: auto;
+      margin-right: auto;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    ul {
+      color: #ccc;
+      padding-left: 20px;
+    }
+    li {
+      margin-bottom: 0.5em;
+    }
+    strong {
+      color: #fff;
+    }
+    a {
+      color: #4af;
+      text-decoration: none;
+    }
+    a:hover {
+      text-decoration: underline;
+    }
+    .demo-link {
+      text-align: center;
+      margin: 15px 0;
+      font-size: 1em;
+    }
+    .demo-link a {
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: #fff;
+      padding: 8px 16px;
+      border-radius: 6px;
+      text-decoration: none;
+      transition: all 0.2s ease;
+      display: inline-block;
+    }
+    .demo-link a:hover {
+      background: rgba(255,255,255,0.2);
+      border-color: rgba(255,255,255,0.3);
+    }
+    code {
+      background: rgba(255,255,255,0.1);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: #fff;
+      font-family: 'Courier New', monospace;
+    }
+    .back-link {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      background: rgba(0,0,0,0.8);
+      padding: 10px 15px;
+      border-radius: 8px;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .back-link a {
+      color: #fff;
+      text-decoration: none;
+      font-size: 14px;
+    }
+    .back-link a:hover {
+      color: #4af;
+    }
+  </style>
+</head>
+<body>
+  <div class="back-link">
+    <a href="index.html">← Back to Demo</a>
+  </div>
+  
+  <div class="container">
+    <h1>Adding 3D Visualization to a Web NES Emulator</h1>
+    
+    <div class="demo-link">
+      <a href="https://ireallyhateyou.github.io/fami3d/" target="_blank">Try the Demo →</a>
+    </div>
+    
+    <img src="assets/img1.png" alt="Demo screenshot">
+    
+    <h2>What?</h2>
+    <p>This project seeks to transform a traditional 2D NES emulator into an interactive 3D experience by using real-time 3D conversion. This runs purely on the browser in JavaScript using Three.js and jsnes.</p>
+    <p>The result is a fully playable NES game that can be viewed and interacted with in 3D-space.</p>
+    
+    <h2>Why?</h2>
+    <p>It makes for a cool and interesting technical demo by mixing retro and new, trying to optimize rendering also poses a technical challenge.</p>
+    <p>This can also be interesting for augmented reality consoles like the Meta Quest. This is also for a hackathon for K-12 students (iykyk).</p>
+    <p>This has also been done before, with <a href="https://geod.itch.io/3dnes" target="_blank">3DSen VR</a> and <a href="https://archive.org/details/thc-3dnes" target="_blank">3DNES</a> (which has become vaporware). But I aspired to make a project that is heuristic (works with every game without a pre-set table), and in JavaScript for extra challenge.</p>
+    
+    <h2>How?</h2>
+    
+    <h3>NES picture rendering</h3>
+    <p>We must first understand how the NES renders frames, this is using a <a href="https://www.nesdev.org/wiki/PPU" target="_blank">PPU (Picture Processing Unit)</a>.</p>
+    <p>This PPU is tasked with rendering a game using two types of 8x8 tiles:</p>
+    <ul>
+      <li><strong>Background tiles</strong>: static elements (think pipes, bricks, etc)</li>
+      <li><strong>Sprite tiles</strong>: dynamic characters and objects (i.e. the main character, mobs)</li>
+    </ul>
+    <p>These sprite tiles are also assigned two <a href="https://www.nesdev.org/wiki/PPU_sprite_priority" target="_blank">priority levels</a>:</p>
+    <ul>
+      <li><strong>Priority 0</strong>: Sprites in front of the background tiles</li>
+      <li><strong>Priority 1</strong>: Sprites behind the background tiles</li>
+    </ul>
+    
+    <img src="assets/img2.png" alt="Render layers diagram">
+    
+    <h3>3D Rendering</h3>
+    <p>By reading data from the PPU directly from jsnes, we can render three canvases:</p>
+    <ol>
+      <li>Background tiles</li>
+      <li>Priority-zero sprites</li>
+      <li>Priority-one sprites</li>
+    </ol>
+    <p>Using Three.js, we can position these layers in 3D space:</p>
+    <ul>
+      <li><code>z = -0.1</code> for priority-1 sprites (behind the background)</li>
+      <li><code>z = 0</code> for background tiles</li>
+      <li><code>z = 1</code> for priority-0 sprites (in front)</li>
+    </ul>
+    <p>This allows us to have (albeit very shoddy and unimpressive) 3D rendering for the NES (more like a floating 2.5D diorama). We can go further by filtering the background color (i.e., the sky) from other background tiles (bricks, pipes, etc.) and applying it to the entire 3D scene.</p>
+    
+    <img src="assets/img3.png" alt="3D layers visualization">
+    
+    <h3>Depth Extrusion</h3>
+    <p>From that foundation, we can add pixel-level extrusion to the tiles and sprites which allows us to have 3D visualization. This approach was first thought up by a FCEUX plugin named <a href="https://github.com/HerbFargus/FCE3D" target="_blank">FCE3D</a>.</p>
+    <p>Since the NES does not distinguish between "background pixels" apart, we used an extremely shoddy approach: sample a "neutral" pixel (in this case, <code>x=4, y=4</code>) and pray that it is the background color. Based on that color, we can filter it out and extrude accordingly.</p>
+    
+    <img src="assets/img4.png" alt="Depth extrusion example">
+    
+    <h3>Optimization</h3>
+    <p>We are making about <strong>185,000 voxels</strong>, hence comes the need for optimization.</p>
+    <p>For tiles, we can calculate their pixel-level extrusion once then reuse a cache. Furthermore, rather than projecting the pixel onto the voxels directly, we made each tile reflect their average color before layering the canvases onto them as a transparent flat plane.</p>
+    
+    <img src="assets/img5.png" alt="Optimization visualization">
+    
+    <h2>Future Enhancements / TODOs</h2>
+    
+    <h3>Extrusion</h3>
+    <p>Currently we only extrude based on whether the pixel is part of the background or not. We could envision the use of depth estimation models like <a href="https://github.com/isl-org/MiDaS" target="_blank">MiDaS</a> and <a href="https://bfl.ai/announcements/24-11-21-tools" target="_blank">FLUX.1</a>.</p>
+    <p>These could generate a depth map for each sprite, possibly fine-tuned from previously-made 3D renders from other games. This approach would be more relevant for consoles like the Super Nintendo, which has higher resolution (and hence more data points) than the NES. Further models could allow for a full-fledged 3D scene to be made.</p>
+    
+    <h3>Performance and Graphics</h3>
+    <p>Performance on games with scrolling are quite shoddy due to the lack of support for multiple nametables.</p>
+    <p>This is still only meant to use the latest version of Chrome/WebGL. Optimizations are being worked on for Firefox and recommendations are welcomed.</p>
+  </div>
+</body>
+</html>
