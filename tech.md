@@ -2,7 +2,7 @@
 
 Feel free to try the demo [here](https://ireallyhateyou.github.io/fami3d/)!
 
-image
+![demo](https://i.imgur.com/IytUMey.png)
 
 ## What?
 
@@ -18,15 +18,18 @@ This can also be interesting for augmented reality consoles like the Meta Quest.
 
 ## How?
 ### NES picture rendering
+
 We must first understand how the NES renders frames, this is using a [PPU (Picture Processing Unit)](https://www.nesdev.org/wiki/PPU).
 
 This PPU is tasked with rendering a game using two types of 8x8 tiles:
-- **Background tiles** - static elements (think pipes, bricks, etc)
-- **Sprite tiles** - dynamic characters and objects (i.e. the main character, mobs)
+- **Background tiles**: static elements (think pipes, bricks, etc)
+- **Sprite tiles**: dynamic characters and objects (i.e. the main character, mobs)
 
 These sprite tiles are also assigned two [priority levels](https://www.nesdev.org/wiki/PPU_sprite_priority):
 - **Priority 0**: Sprites in front of the background tiles
 - **Priority 1**: Sprites behind the background tiles
+
+![render](https://i.imgur.com/W9RNDnc.png)
 
 ### 3D Rendering 
 
@@ -42,17 +45,23 @@ Using Three.js, we can position these layers in 3D space:
 
 This allows us to have (albeit very shoddy and unimpressive) 3D rendering for the NES (more like a floating 2.5D diorama). We can go further by filtering the background color (i.e., the sky) from other background tiles (bricks, pipes, etc.) and applying it to the entire 3D scene.
 
+![render](https://i.imgur.com/8R8fMjL.png)
+
 ### Depth Extrusion
 
 From that foundation, we can add pixel-level extrusion to the tiles and sprites which allows us to have 3D visualization. This approach was first thought up by a FCEUX plugin named [FCE3D](https://github.com/HerbFargus/FCE3D).
 
 Since the NES does not distinguish between "background pixels" apart, we used an extremely shoddy approach: sample a "neutral" pixel (in this case, `x=4, y=4`) and pray that it is the background color. Based on that color, we can filter it out and extrude accordingly.
 
+![render](https://i.imgur.com/lzCCzQj.png)
+
 ### Optimization 
 
 We are making about **185,000 voxels**, hence comes the need for optimization.
 
 For tiles, we can calculate their pixel-level extrusion once then reuse a cache. Furthermore, rather than projecting the pixel onto the voxels directly, we made each tile reflect their average color before layering the canvases onto them as a transparent flat plane.
+
+![render](https://i.imgur.com/9b7WXb6.png)
 
 ## Future Enhancements / TODOs
 
